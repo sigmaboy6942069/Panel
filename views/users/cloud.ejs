@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0f">
+  <title><%= title || 'My Cloud Servers - TGVPANEL' %></title>
+  <link rel="icon" href="<%= siteLogo %>" type="image/png">
+  <link rel="stylesheet" href="/css/admin.css">
+  <style>
+    .cloud-head {
+      display: flex; justify-content: space-between; align-items: center; gap: 16px;
+      flex-wrap: wrap; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle);
+    }
+    .cloud-head h1 { margin: 0 0 5px 0; font-size: 23px; color: var(--text-primary); }
+    .cloud-head p { margin: 0; font-size: 13px; color: var(--text-muted); }
+    .head-chips { display: flex; gap: 10px; flex-wrap: wrap; }
+    .chip {
+      background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 11px;
+      padding: 9px 14px; font-size: 12px; color: var(--text-muted);
+    }
+    .chip strong { display: block; font-size: 16px; color: var(--text-primary); line-height: 1.2; }
+    .chip.credit strong { color: #10B981; }
+
+    .srv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+    .srv-card {
+      position: relative; background: var(--bg-card); border: 1px solid var(--border-card);
+      border-radius: 14px; padding: 17px; transition: transform .2s ease, border-color .2s ease;
+    }
+    .srv-card:hover { transform: translateY(-3px); border-color: rgba(99,102,241,.42); }
+    .srv-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 14px 14px 0 0; background: linear-gradient(90deg,#6B7280,#4B5563); }
+    .srv-card.running::before { background: linear-gradient(90deg,#10B981,#06B6D4); }
+    .srv-card.building::before { background: linear-gradient(90deg,#F59E0B,#F97316); }
+    .srv-card.problem::before { background: linear-gradient(90deg,#EF4444,#DC2626); }
+    .srv-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+    .srv-name { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 0 0 4px 0; }
+    .srv-name a { color: inherit; text-decoration: none; }
+    .srv-name a:hover { color: #818cf8; }
+    .srv-meta { font-size: 11px; color: var(--text-muted); display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+    .srv-cpu { background: rgba(99,102,241,.12); color: #818cf8; padding: 1px 7px; border-radius: 6px; font-weight: 600; font-size: 10px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap;
+    }
+    .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .pill.running { background: rgba(16,185,129,.15); color: #10B981; }
+    .pill.stopped { background: rgba(107,114,128,.2); color: #9CA3AF; }
+    .pill.building { background: rgba(245,158,11,.17); color: #F59E0B; }
+    .pill.problem { background: rgba(239,68,68,.15); color: #F87171; }
+    .pill.suspended { background: rgba(239,68,68,.15); color: #F87171; }
+
+    .srv-specs { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 12px; margin-bottom: 12px; }
+    .srv-spec { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+    .srv-spec svg { width: 13px; height: 13px; color: var(--text-muted); }
+    .srv-spec strong { color: var(--text-primary); }
+    .srv-ip { font-family: 'SF Mono', ui-monospace, monospace; font-size: 11px; color: var(--text-secondary); background: rgba(0,0,0,.22); border-radius: 7px; padding: 7px 9px; margin-bottom: 12px; word-break: break-all; }
+    .srv-ip .none { color: var(--text-muted); font-style: italic; }
+    .srv-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-top: 1px solid var(--border-subtle); padding-top: 11px; flex-wrap: wrap; }
+    .srv-price { font-size: 12px; color: var(--text-muted); }
+    .srv-price strong { color: var(--text-primary); font-size: 14px; }
+    .srv-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .icon-btn {
+      width: 31px; height: 31px; display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 8px; border: 1px solid var(--border-color); background: transparent;
+      color: var(--text-muted); cursor: pointer; transition: all .15s;
+    }
+    .icon-btn:hover { color: var(--text-primary); border-color: #6366F1; }
+    .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+    .icon-btn svg { width: 14px; height: 14px; }
+    .icon-btn.start:hover { color: #10B981; border-color: #10B981; }
+    .icon-btn.stop:hover { color: #EF4444; border-color: #EF4444; }
+
+    .empty-state {
+      background: var(--bg-card); border: 1px dashed var(--border-card); border-radius: 14px;
+      padding: 46px 22px; text-align: center; color: var(--text-muted);
+    }
+    .empty-state h2 { color: var(--text-primary); margin: 0 0 8px 0; font-size: 18px; }
+    .empty-state a { color: #818cf8; font-weight: 600; }
+    .btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 7px; }
+    .btn:hover { color: var(--text-primary); border-color: #6366F1; }
+    .btn-primary { background: linear-gradient(135deg,#6366F1,#8B5CF6); border: none; color: #fff; }
+    .btn-primary:hover { color: #fff; filter: brightness(1.08); }
+    .toast-wrap { position: fixed; right: 18px; bottom: 18px; z-index: 3000; display: flex; flex-direction: column; gap: 8px; }
+    .toast { background: var(--bg-card); border: 1px solid var(--border-card); border-left: 3px solid #6366F1; border-radius: 10px; padding: 11px 15px; font-size: 13px; color: var(--text-primary); box-shadow: 0 12px 30px rgba(0,0,0,.45); max-width: 380px; }
+    .toast.error { border-left-color: #EF4444; }
+    .toast.success { border-left-color: #10B981; }
+    .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 2500; display: none; align-items: center; justify-content: center; padding: 20px; }
+    .confirm-overlay.open { display: flex; }
+    .confirm-card { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 13px; max-width: 430px; width: 100%; padding: 20px; }
+    .confirm-card h3 { margin: 0 0 9px 0; font-size: 16px; color: var(--text-primary); }
+    .confirm-card p { margin: 0 0 16px 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+  </style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="c-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></symbol>
+    <symbol id="c-mem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="1"/><line x1="6" y1="11" x2="6" y2="13"/><line x1="10" y1="11" x2="10" y2="13"/><line x1="14" y1="11" x2="14" y2="13"/><line x1="18" y1="11" x2="18" y2="13"/></symbol>
+    <symbol id="c-disk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></symbol>
+    <symbol id="c-net" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></symbol>
+    <symbol id="c-play" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></symbol>
+    <symbol id="c-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></symbol>
+    <symbol id="c-restart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="c-term" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></symbol>
+    <symbol id="c-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
+    <symbol id="c-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+  </defs>
+</svg>
+
+<div class="admin-wrapper">
+  <%- include('../partials/users/sidebar') %>
+
+  <div class="admin-main">
+    <%- include('../partials/admin/header') %>
+
+    <div class="admin-content">
+
+      <div class="cloud-head">
+        <div>
+          <h1>My Cloud Servers</h1>
+          <p>Upstream-provisioned KVM servers attached to your account · Düsseldorf, DE</p>
+        </div>
+        <div class="head-chips">
+          <div class="chip credit"><strong id="balanceChip"><%= (balanceCents / 100).toFixed(2) %> €</strong>Panel credit</div>
+          <div class="chip"><strong id="countChip"><%= servers.length %></strong>Servers</div>
+          <button class="btn" onclick="refreshAll()"><svg style="width:13px;height:13px"><use href="#c-refresh"/></svg> Refresh</button>
+          <a class="btn btn-primary" href="/store"><svg style="width:13px;height:13px"><use href="#c-plus"/></svg> Order a server</a>
+        </div>
+      </div>
+
+      <div id="alerts"></div>
+      <div id="serverList"></div>
+
+    </div>
+
+    <%- include('../partials/admin/footer') %>
+  </div>
+</div>
+
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-card">
+    <h3 id="confirmTitle">Are you sure?</h3>
+    <p id="confirmText"></p>
+    <div style="display:flex;gap:9px;justify-content:flex-end">
+      <button class="btn" onclick="closeConfirm(false)">Cancel</button>
+      <button class="btn btn-primary" onclick="closeConfirm(true)">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+let SERVERS = <%- JSON.stringify(servers) %>;
+
+function money(cents) {
+  if (cents === null || cents === undefined || isNaN(cents)) return '—';
+  const n = Math.round(Number(cents));
+  const sign = n < 0 ? '-' : '';
+  return sign + (Math.abs(n) / 100).toFixed(2) + ' €';
+}
+function esc(v) {
+  return String(v === null || v === undefined ? '' : v).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function toast(msg, type) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || '');
+  el.textContent = msg;
+  document.getElementById('toastWrap').appendChild(el);
+  setTimeout(() => el.remove(), 5000);
+}
+
+async function api(url, options) {
+  const opts = Object.assign({ method: 'GET', cache: 'no-store', headers: {} }, options || {});
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  if (meta && meta.content) opts.headers['X-CSRF-Token'] = meta.content;
+  if (opts.body && typeof opts.body === 'object') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(opts.body);
+  }
+  const res = await fetch(url, opts);
+  let data = {};
+  try { data = await res.json(); } catch (_e) { data = {}; }
+  if (!res.ok) {
+    const err = new Error(data.error || ('Request failed (HTTP ' + res.status + ')'));
+    err.code = data.code;
+    throw err;
+  }
+  return data;
+}
+
+function confirmBox(title, text) {
+  return new Promise(function (resolve) {
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmText').textContent = text;
+    document.getElementById('confirmOverlay').classList.add('open');
+    window.__confirmResolve = resolve;
+  });
+}
+function closeConfirm(value) {
+  document.getElementById('confirmOverlay').classList.remove('open');
+  if (window.__confirmResolve) { window.__confirmResolve(value); window.__confirmResolve = null; }
+}
+
+function stateOf(s) {
+  if (s.suspended) return { cls: 'suspended', label: 'Suspended' };
+  const st = String(s.state || '').toLowerCase();
+  if (st === 'install' || st === 'reinstall' || st === 'pending') return { cls: 'building', label: st === 'reinstall' ? 'Reinstalling' : 'Building' };
+  if (st === 'expired' || st === 'cancelled') return { cls: 'problem', label: st.charAt(0).toUpperCase() + st.slice(1) };
+  if (st === 'suspended') return { cls: 'suspended', label: 'Suspended' };
+  const pw = String(s.powerStatus || 'unknown').toLowerCase();
+  if (pw === 'running') return { cls: 'running', label: 'Running' };
+  if (pw === 'stopped') return { cls: 'stopped', label: 'Stopped' };
+  return { cls: 'stopped', label: st ? st.charAt(0).toUpperCase() + st.slice(1) : 'Unknown' };
+}
+
+function render() {
+  const host = document.getElementById('serverList');
+  document.getElementById('countChip').textContent = SERVERS.length;
+
+  if (!SERVERS.length) {
+    host.innerHTML =
+      '<div class="empty-state"><h2>No cloud servers yet</h2>' +
+      '<p>Order your first server from the <a href="/store">Server Store</a> — it is provisioned onto this account instantly.</p></div>';
+    return;
+  }
+
+  host.innerHTML = '<div class="srv-grid">' + SERVERS.map(function (s) {
+    const st = stateOf(s);
+    const building = st.cls === 'building';
+    const canPower = !building && !s.suspended;
+    const ipLine = s.primaryIpv4 || s.primaryIpv6
+      ? esc([s.primaryIpv4, s.primaryIpv6].filter(Boolean).join('  ·  '))
+      : '<span class="none">IP pending — server is still building</span>';
+
+    return '' +
+      '<div class="srv-card ' + st.cls + '">' +
+        '<div class="srv-top">' +
+          '<div style="min-width:0">' +
+            '<h3 class="srv-name"><a href="/cloud/' + s.id + '">' + esc(s.name) + '</a></h3>' +
+            '<div class="srv-meta">' +
+              '<span class="srv-cpu">' + esc(s.cpuLabel || s.cpuFamily || 'KVM') + '</span>' +
+              '<span>#' + s.id + '</span>' +
+              (s.osLabel ? '<span>' + esc(s.osLabel) + '</span>' : '') +
+            '</div>' +
+          '</div>' +
+          '<span class="pill ' + st.cls + '"><span class="dot"></span>' + esc(st.label) + '</span>' +
+        '</div>' +
+
+        '<div class="srv-specs">' +
+          '<div class="srv-spec"><svg><use href="#c-cpu"/></svg><strong>' + s.cores + '</strong> vCPU</div>' +
+          '<div class="srv-spec"><svg><use href="#c-mem"/></svg><strong>' + s.memoryGb + '</strong> GB RAM</div>' +
+          '<div class="srv-spec"><svg><use href="#c-disk"/></svg><strong>' + s.diskGb + '</strong> GB</div>' +
+          '<div class="srv-spec"><svg><use href="#c-net"/></svg><strong>' + s.connectionGbit + '</strong> Gbit/s</div>' +
+        '</div>' +
+
+        '<div class="srv-ip">' + ipLine + '</div>' +
+
+        '<div class="srv-foot">' +
+          '<div class="srv-price"><strong>' + money(s.retailCents) + '</strong> / ' + s.durationMonths + ' mo' +
+            (s.expiresAt ? '<br>expires ' + esc(s.expiresAt.slice(0, 10)) : '') +
+          '</div>' +
+          '<div class="srv-actions">' +
+            '<button class="icon-btn start" title="Start" ' + (canPower ? '' : 'disabled') + ' onclick="power(' + s.id + ',\'start\')"><svg><use href="#c-play"/></svg></button>' +
+            '<button class="icon-btn stop" title="Stop (hard)" ' + (canPower ? '' : 'disabled') + ' onclick="power(' + s.id + ',\'stop\')"><svg><use href="#c-stop"/></svg></button>' +
+            '<button class="icon-btn" title="Restart" ' + (canPower ? '' : 'disabled') + ' onclick="power(' + s.id + ',\'restart\')"><svg><use href="#c-restart"/></svg></button>' +
+            '<button class="icon-btn" title="Console (noVNC)" ' + (building ? 'disabled' : '') + ' onclick="openConsole(' + s.id + ')"><svg><use href="#c-term"/></svg></button>' +
+            '<button class="icon-btn" title="Refresh from provider" onclick="refreshOne(' + s.id + ')"><svg><use href="#c-refresh"/></svg></button>' +
+            '<a class="icon-btn" title="Details" href="/cloud/' + s.id + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></a>' +
+          '</div>' +
+        '</div>' +
+        (s.suspended && s.suspendedReason ? '<div style="margin-top:9px;font-size:11px;color:#F87171">' + esc(s.suspendedReason) + '</div>' : '') +
+        (s.lastError ? '<div style="margin-top:9px;font-size:11px;color:#F59E0B">' + esc(s.lastError) + '</div>' : '') +
+      '</div>';
+  }).join('') + '</div>';
+}
+
+async function power(id, action) {
+  const labels = { start: 'start', stop: 'stop (hard power off)', restart: 'restart' };
+  const ok = await confirmBox(
+    action.charAt(0).toUpperCase() + action.slice(1) + ' server',
+    'Really ' + labels[action] + ' this server?' + (action === 'stop' ? ' Unsaved work inside the OS will be lost.' : '')
+  );
+  if (!ok) return;
+  try {
+    toast('Sending ' + action + '…');
+    const data = await api('/api/v1/reseller/servers/' + id + '/power', { method: 'POST', body: { action: action } });
+    toast(action + ' accepted', 'success');
+    if (data.server) {
+      const idx = SERVERS.findIndex(function (s) { return s.id === id; });
+      if (idx >= 0) SERVERS[idx] = data.server;
+      render();
+    }
+    setTimeout(function () { refreshOne(id); }, 4000);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function openConsole(id) {
+  try {
+    const data = await api('/api/v1/reseller/servers/' + id + '/console');
+    if (data.consoleUrl) window.open(data.consoleUrl, '_blank', 'noopener');
+    else toast('The provider did not return a console link.', 'error');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function refreshOne(id) {
+  try {
+    const data = await api('/api/v1/reseller/servers/' + id + '/refresh', { method: 'POST' });
+    const idx = SERVERS.findIndex(function (s) { return s.id === id; });
+    if (idx >= 0 && data.server) SERVERS[idx] = data.server;
+    render();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function refreshAll() {
+  try {
+    const [list, wallet] = await Promise.all([
+      api('/api/v1/reseller/servers'),
+      api('/api/v1/reseller/wallet').catch(function () { return null; }),
+    ]);
+    SERVERS = list.servers || [];
+    if (wallet) document.getElementById('balanceChip').textContent = money(wallet.balanceCents);
+    render();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+render();
+setInterval(refreshAll, 30000);
+</script>
+</body>
+</html>
