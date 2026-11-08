@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title || 'Two-Factor Verification - TGVPANEL' %></title>
+  <link rel="icon" href="<%= siteLogo %>" type="image/png">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg-primary,#09090f);">
+  <div style="width:100%;max-width:400px;background:var(--bg-card,#12121d);border:1px solid var(--border-card,rgba(255,255,255,0.08));border-radius:16px;padding:28px;">
+    <h2 style="margin:0 0 8px;color:var(--text-primary,#fff);">Two-Factor Verification</h2>
+    <p style="margin:0 0 18px;font-size:13px;color:var(--text-muted,#9ca3af);">
+      Enter the 6-digit TOTP code from your authenticator app for <strong><%= username %></strong>.
+    </p>
+    <form onsubmit="verify2fa(event)">
+      <input id="totpCode" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000"
+             style="width:100%;padding:12px;font-size:20px;letter-spacing:6px;text-align:center;border-radius:10px;border:1px solid var(--border-color,#2d2d3d);background:rgba(0,0,0,0.3);color:#fff;margin-bottom:14px;">
+      <div id="errMsg" style="color:#ef4444;font-size:13px;margin-bottom:10px;display:none;"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;">Verify &amp; Sign In</button>
+    </form>
+  </div>
+  <script>
+    async function verify2fa(e) {
+      e.preventDefault();
+      const errEl = document.getElementById('errMsg');
+      errEl.style.display = 'none';
+      const res = await fetch('/api/login/2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: document.getElementById('totpCode').value })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errEl.textContent = data.error || 'Verification failed';
+        errEl.style.display = 'block';
+        return;
+      }
+      window.location.href = data.redirectUrl || '/dashboard';
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <rect width="128" height="128" rx="26" fill="#141821"/>
+  <rect x="3" y="3" width="122" height="122" rx="23" stroke="#0069DA" stroke-opacity="0.4" stroke-width="2"/>
+  <!-- AlmaLinux 5-color petal emblem -->
+  <path d="M64 22C73 22 80 31 78 44L64 58L50 44C48 31 55 22 64 22Z" fill="#FF4649"/>
+  <path d="M104 51C107 60 100 69 87 71L70 62L79 45C91 40 101 43 104 51Z" fill="#FFAD00"/>
+  <path d="M89 98C81 103 70 99 65 87L68 68L87 72C96 81 96 93 89 98Z" fill="#24C875"/>
+  <path d="M39 98C32 93 32 81 41 72L60 68L63 87C58 99 47 103 39 98Z" fill="#0069DA"/>
+  <path d="M24 51C27 43 37 40 49 45L58 62L41 71C28 69 21 60 24 51Z" fill="#86DA2F"/>
+  <circle cx="64" cy="64" r="10" fill="#141821"/>
+</svg>

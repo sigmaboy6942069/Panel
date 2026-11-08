@@ -1,0 +1,1571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <link rel="icon" href="<%= siteLogo %>" type="image/png">
+  <link rel="stylesheet" href="/css/admin.css">
+  <style>
+    .lxc-wrap { max-width: 1380px; margin: 0 auto; }
+
+    /* Hero Header */
+    .lxc-hero {
+      background: linear-gradient(145deg, rgba(6, 182, 212, 0.08) 0%, rgba(99, 102, 241, 0.06) 48%, var(--bg-card) 100%);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      padding: 20px 22px;
+      margin-bottom: 18px;
+      position: relative;
+      overflow: hidden;
+    }
+    .lxc-hero::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, #06b6d4, #6366f1, #8b5cf6);
+    }
+    .lxc-back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-decoration: none;
+      margin-bottom: 12px;
+      transition: color 0.15s ease;
+    }
+    .lxc-back-link:hover { color: #22d3ee; }
+
+    .lxc-hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .lxc-identity {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+    .lxc-distro-avatar {
+      width: 50px;
+      height: 50px;
+      border-radius: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      flex-shrink: 0;
+    }
+    .lxc-title-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      flex-wrap: wrap;
+    }
+    .lxc-title {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text-primary);
+      letter-spacing: -0.3px;
+    }
+    .lxc-id-chip {
+      font-family: monospace;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: rgba(99, 102, 241, 0.15);
+      color: #818cf8;
+      border: 1px solid rgba(99, 102, 241, 0.28);
+    }
+    .lxc-engine-badge {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: rgba(6, 182, 212, 0.15);
+      color: #22d3ee;
+      border: 1px solid rgba(6, 182, 212, 0.3);
+    }
+    .lxc-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .lxc-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .lxc-status-pill.st-running {
+      background: rgba(16, 185, 129, 0.14);
+      color: #34d399;
+      border-color: rgba(16, 185, 129, 0.32);
+    }
+    .lxc-status-pill.st-running .lxc-status-dot {
+      box-shadow: 0 0 8px #34d399;
+      animation: lxcPulse 2s infinite;
+    }
+    .lxc-status-pill.st-stopped {
+      background: rgba(148, 163, 184, 0.14);
+      color: #94a3b8;
+      border-color: rgba(148, 163, 184, 0.28);
+    }
+    .lxc-status-pill.st-frozen {
+      background: rgba(6, 182, 212, 0.16);
+      color: #22d3ee;
+      border-color: rgba(6, 182, 212, 0.35);
+    }
+    .lxc-status-pill.st-suspended {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.35);
+    }
+    @keyframes lxcPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.88); }
+    }
+
+    .lxc-meta-strip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .lxc-meta-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-subtle);
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    .lxc-meta-chip code {
+      color: var(--text-primary);
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .lxc-meta-chip.kvm-on {
+      background: rgba(16, 185, 129, 0.1);
+      border-color: rgba(16, 185, 129, 0.3);
+      color: #34d399;
+    }
+    .lxc-copy-mini {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 1px 3px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 4px;
+    }
+    .lxc-copy-mini:hover { color: #22d3ee; background: rgba(6, 182, 212, 0.12); }
+
+    /* Action Toolbar */
+    .lxc-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .lxc-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 13px;
+      border-radius: 9px;
+      font-size: 12.5px;
+      font-weight: 600;
+      border: 1px solid var(--border-card);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+    .lxc-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      border-color: rgba(255, 255, 255, 0.22);
+    }
+    .lxc-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .lxc-btn-pty {
+      background: linear-gradient(135deg, #06b6d4, #6366f1);
+      color: #ffffff !important;
+      border-color: transparent;
+      box-shadow: 0 4px 14px rgba(6, 182, 212, 0.25);
+    }
+    .lxc-btn-pty:hover { filter: brightness(1.08); }
+    .lxc-btn-start { border-color: rgba(16, 185, 129, 0.35); color: #34d399; background: rgba(16, 185, 129, 0.08); }
+    .lxc-btn-start:hover:not(:disabled) { background: rgba(16, 185, 129, 0.16); border-color: rgba(16, 185, 129, 0.55); }
+    .lxc-btn-restart { border-color: rgba(99, 102, 241, 0.35); color: #818cf8; background: rgba(99, 102, 241, 0.08); }
+    .lxc-btn-restart:hover:not(:disabled) { background: rgba(99, 102, 241, 0.16); }
+    .lxc-btn-freeze { border-color: rgba(6, 182, 212, 0.35); color: #22d3ee; background: rgba(6, 182, 212, 0.08); }
+    .lxc-btn-freeze:hover:not(:disabled) { background: rgba(6, 182, 212, 0.16); }
+    .lxc-btn-stop { border-color: rgba(239, 68, 68, 0.35); color: #f87171; background: rgba(239, 68, 68, 0.08); }
+    .lxc-btn-stop:hover:not(:disabled) { background: rgba(239, 68, 68, 0.16); }
+
+    /* Telemetry Grid */
+    .lxc-stat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    @media (max-width: 1024px) {
+      .lxc-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+      .lxc-stat-grid { grid-template-columns: 1fr; }
+    }
+    .lxc-stat {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 13px;
+      padding: 15px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: border-color 0.16s ease;
+    }
+    .lxc-stat:hover { border-color: rgba(6, 182, 212, 0.35); }
+    .lxc-stat-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .lxc-stat-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .lxc-stat-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .lxc-stat-val {
+      font-size: 21px;
+      font-weight: 800;
+      color: var(--text-primary);
+      line-height: 1.15;
+    }
+    .lxc-meter {
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.07);
+      overflow: hidden;
+    }
+    .lxc-meter-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      transition: width 0.4s ease;
+    }
+    .lxc-stat-sub {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    /* Navigation Tabs */
+    .lxc-tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding: 6px;
+      border-radius: 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      margin-bottom: 18px;
+    }
+    .lxc-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 14px;
+      border-radius: 9px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 12.5px;
+      font-weight: 600;
+      transition: all 0.16s ease;
+    }
+    .lxc-tab:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .lxc-tab.active {
+      background: linear-gradient(135deg, #06b6d4, #6366f1);
+      color: #ffffff;
+      box-shadow: 0 3px 12px rgba(6, 182, 212, 0.24);
+    }
+
+    /* Panes & Cards */
+    .lxc-pane { display: none; }
+    .lxc-pane.active { display: block; }
+
+    .lxc-grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 920px) {
+      .lxc-grid-2 { grid-template-columns: 1fr; }
+    }
+
+    .lxc-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .lxc-grid-2 > .lxc-card { margin-bottom: 0; }
+
+    .lxc-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .lxc-card-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .lxc-card-sub {
+      margin: 3px 0 0;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Key-Value Spec Rows */
+    .lxc-kv-list { display: flex; flex-direction: column; }
+    .lxc-kv-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 13px;
+    }
+    .lxc-kv-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .lxc-kv-k { color: var(--text-muted); font-weight: 500; }
+    .lxc-kv-v { color: var(--text-primary); font-weight: 600; text-align: right; word-break: break-all; }
+
+    .lxc-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 9px;
+      border-radius: 999px;
+    }
+    .lxc-badge.on { background: rgba(16, 185, 129, 0.14); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .lxc-badge.off { background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.24); }
+    .lxc-badge.warn { background: rgba(245, 158, 11, 0.14); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+
+    /* Forms */
+    .lxc-form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 13px;
+    }
+    .lxc-field label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .lxc-input, .lxc-field input, .lxc-field select, .lxc-field textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 9.5px 12px;
+      border-radius: 9px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    .lxc-input:focus, .lxc-field input:focus, .lxc-field select:focus, .lxc-field textarea:focus {
+      border-color: #06b6d4;
+    }
+    .lxc-chip-btn {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 6px;
+      border: 1px solid rgba(6, 182, 212, 0.35);
+      background: rgba(6, 182, 212, 0.1);
+      color: #22d3ee;
+      cursor: pointer;
+    }
+    .lxc-chip-btn:hover { background: rgba(6, 182, 212, 0.2); }
+
+    /* Toggle Cards (for KVM Nesting, Container Nesting, Autostart) */
+    .lxc-toggle-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .lxc-toggle-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 15px;
+      border-radius: 11px;
+      border: 1px solid var(--border-card);
+      background: var(--bg-secondary);
+      cursor: pointer;
+      transition: border-color 0.15s ease;
+    }
+    .lxc-toggle-card:hover { border-color: rgba(6, 182, 212, 0.45); }
+    .lxc-toggle-card input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: #06b6d4;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    /* Tables */
+    .lxc-table-wrap { overflow-x: auto; }
+    .lxc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .lxc-table th {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-card);
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+    .lxc-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      vertical-align: middle;
+    }
+    .lxc-table tr:last-child td { border-bottom: none; }
+
+    /* Breadcrumbs */
+    .lxc-breadcrumbs {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+      padding: 7px 11px;
+      border-radius: 8px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      font-size: 12.5px;
+    }
+    .lxc-crumb {
+      background: none;
+      border: none;
+      color: #22d3ee;
+      font-family: monospace;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 2px 5px;
+      border-radius: 5px;
+    }
+    .lxc-crumb:hover { background: rgba(6, 182, 212, 0.14); }
+  </style>
+</head>
+<body>
+<%
+  const _cfg = lxcConfig || {};
+  const _osRaw = String(instance.osLabel || '').toLowerCase();
+  let _brand = { short: 'LX', bg: 'rgba(6,182,212,0.16)', fg: '#22d3ee', border: 'rgba(6,182,212,0.35)' };
+  if (_osRaw.includes('ubuntu')) _brand = { short: 'UB', bg: 'rgba(233,84,32,0.16)', fg: '#fb923c', border: 'rgba(251,146,60,0.35)' };
+  else if (_osRaw.includes('debian')) _brand = { short: 'DB', bg: 'rgba(215,10,83,0.16)', fg: '#f43f5e', border: 'rgba(244,63,94,0.35)' };
+  else if (_osRaw.includes('alma')) _brand = { short: 'AL', bg: 'rgba(16,185,129,0.16)', fg: '#34d399', border: 'rgba(52,211,153,0.35)' };
+  else if (_osRaw.includes('rocky')) _brand = { short: 'RK', bg: 'rgba(6,182,212,0.16)', fg: '#22d3ee', border: 'rgba(34,211,238,0.35)' };
+  else if (_osRaw.includes('centos')) _brand = { short: 'CS', bg: 'rgba(139,92,246,0.16)', fg: '#a78bfa', border: 'rgba(167,139,250,0.35)' };
+  else if (_osRaw.includes('fedora')) _brand = { short: 'FD', bg: 'rgba(59,130,246,0.18)', fg: '#60a5fa', border: 'rgba(96,165,250,0.35)' };
+  else if (_osRaw.includes('kali')) _brand = { short: 'KL', bg: 'rgba(168,85,247,0.18)', fg: '#c084fc', border: 'rgba(192,132,252,0.35)' };
+  else if (_osRaw.includes('alpine')) _brand = { short: 'AP', bg: 'rgba(14,165,233,0.16)', fg: '#38bdf8', border: 'rgba(56,189,248,0.35)' };
+
+  const _initStatus = String(instance.status || 'stopped').toLowerCase();
+  const _statusClass =
+    _initStatus === 'running' ? 'st-running' :
+    _initStatus === 'frozen' ? 'st-frozen' :
+    _initStatus === 'suspended' ? 'st-suspended' : 'st-stopped';
+%>
+
+<!-- SVG Sprite -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="lx-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></symbol>
+    <symbol id="lx-play" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></symbol>
+    <symbol id="lx-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></symbol>
+    <symbol id="lx-restart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="lx-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></symbol>
+    <symbol id="lx-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></symbol>
+    <symbol id="lx-ram" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+    <symbol id="lx-disk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></symbol>
+    <symbol id="lx-net" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+    <symbol id="lx-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></symbol>
+    <symbol id="lx-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="lx-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="lx-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
+    <symbol id="lx-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="lx-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+    <symbol id="lx-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="lx-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></symbol>
+  </defs>
+</svg>
+
+<div class="admin-wrapper">
+  <% if (isStaff) { %>
+    <%- include('../partials/admin/sidebar') %>
+  <% } else { %>
+    <%- include('../partials/users/sidebar') %>
+  <% } %>
+  <div class="admin-main">
+    <%- include('../partials/admin/header') %>
+    <div class="admin-content">
+      <div class="lxc-wrap">
+
+        <!-- HERO HEADER -->
+        <div class="lxc-hero">
+          <a href="<%= isStaff ? '/admin/lxc' : '/lxc' %>" class="lxc-back-link">
+            <span>&larr;</span> Back to LXC Containers
+          </a>
+
+          <div class="lxc-hero-top">
+            <div class="lxc-identity">
+              <div class="lxc-distro-avatar" style="background:<%= _brand.bg %>;color:<%= _brand.fg %>;border:1px solid <%= _brand.border %>;">
+                <%= _brand.short %>
+              </div>
+              <div>
+                <div class="lxc-title-row">
+                  <h1 class="lxc-title"><%= instance.name %></h1>
+                  <span class="lxc-id-chip">#<%= instance.refId %></span>
+                  <span class="lxc-engine-badge">LXC NATIVE</span>
+                  <span id="hdrStatusPill" class="lxc-status-pill <%= _statusClass %>">
+                    <span class="lxc-status-dot"></span>
+                    <span id="hdrStatus"><%= instance.status %></span>
+                  </span>
+                </div>
+
+                <div class="lxc-meta-strip">
+                  <span class="lxc-meta-chip">Node: <code><%= instance.nodeName %></code></span>
+                  <span class="lxc-meta-chip">OS: <code><%= instance.osLabel %></code></span>
+                  <span class="lxc-meta-chip">
+                    IP: <code id="hdrIp"><%= instance.primaryIp || 'DHCP / Unassigned' %></code>
+                    <% if (instance.primaryIp) { %>
+                    <button type="button" class="lxc-copy-mini" title="Copy IP" onclick="copyText('<%= instance.primaryIp.split('/')[0] %>', 'IP address copied')">
+                      <svg width="12" height="12"><use href="#lx-copy"/></svg>
+                    </button>
+                    <% } %>
+                  </span>
+                  <span class="lxc-meta-chip">Bridge: <code><%= _cfg.bridge || 'lxcbr0' %></code></span>
+                  <span class="lxc-meta-chip <%= _cfg.kvmNesting ? 'kvm-on' : '' %>">
+                    KVM (/dev/kvm): <strong><%= _cfg.kvmNesting ? 'Enabled' : 'Disabled' %></strong>
+                  </span>
+                  <span class="lxc-meta-chip" id="hdrPidWrap" style="display:none;">PID: <code id="hdrPid">—</code></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="lxc-actions">
+              <a href="/lxc/<%= instance.refId %>/console" class="lxc-btn lxc-btn-pty">
+                <svg width="14" height="14"><use href="#lx-terminal"/></svg>
+                <span>Open PTY Terminal</span>
+              </a>
+              <button type="button" id="btnStart" class="lxc-btn lxc-btn-start" onclick="doLxcAction('start')">
+                <svg width="11" height="11"><use href="#lx-play"/></svg>
+                <span>Start</span>
+              </button>
+              <button type="button" id="btnRestart" class="lxc-btn lxc-btn-restart" onclick="doLxcAction('restart')">
+                <svg width="13" height="13"><use href="#lx-restart"/></svg>
+                <span>Restart</span>
+              </button>
+              <button type="button" id="btnFreeze" class="lxc-btn lxc-btn-freeze" onclick="doLxcAction('freeze')">
+                <svg width="13" height="13"><use href="#lx-pause"/></svg>
+                <span>Freeze</span>
+              </button>
+              <button type="button" id="btnUnfreeze" class="lxc-btn lxc-btn-freeze" style="display:none;" onclick="doLxcAction('unfreeze')">
+                <svg width="11" height="11"><use href="#lx-play"/></svg>
+                <span>Unfreeze</span>
+              </button>
+              <button type="button" id="btnStop" class="lxc-btn lxc-btn-stop" onclick="doLxcAction('stop')">
+                <svg width="11" height="11"><use href="#lx-stop"/></svg>
+                <span>Stop</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- LIVE TELEMETRY CARDS -->
+        <div class="lxc-stat-grid">
+          <div class="lxc-stat">
+            <div class="lxc-stat-head">
+              <span class="lxc-stat-label">CPU Load</span>
+              <span class="lxc-stat-icon" style="background:rgba(6,182,212,0.14);color:#22d3ee;">
+                <svg width="17" height="17"><use href="#lx-cpu"/></svg>
+              </span>
+            </div>
+            <div class="lxc-stat-val" id="stCpu">0%</div>
+            <div class="lxc-meter"><div class="lxc-meter-fill" id="stCpuBar" style="background:linear-gradient(90deg,#06b6d4,#3b82f6);"></div></div>
+            <div class="lxc-stat-sub">
+              <span><%= instance.cpuCores %> vCPU <%= instance.cpuCores > 1 ? 'Cores' : 'Core' %></span>
+              <span><%= _cfg.cpuLimitPercent || 100 %>% Cap</span>
+            </div>
+          </div>
+
+          <div class="lxc-stat">
+            <div class="lxc-stat-head">
+              <span class="lxc-stat-label">Memory Usage</span>
+              <span class="lxc-stat-icon" style="background:rgba(99,102,241,0.15);color:#818cf8;">
+                <svg width="17" height="17"><use href="#lx-ram"/></svg>
+              </span>
+            </div>
+            <div class="lxc-stat-val" id="stRam">0 MB (0%)</div>
+            <div class="lxc-meter"><div class="lxc-meter-fill" id="stRamBar" style="background:linear-gradient(90deg,#6366f1,#a855f7);"></div></div>
+            <div class="lxc-stat-sub">
+              <span>Quota: <%= instance.ramMb %> MB</span>
+              <span>Swap: <%= instance.swapMb %> MB</span>
+            </div>
+          </div>
+
+          <div class="lxc-stat">
+            <div class="lxc-stat-head">
+              <span class="lxc-stat-label">Rootfs Storage</span>
+              <span class="lxc-stat-icon" style="background:rgba(16,185,129,0.14);color:#34d399;">
+                <svg width="17" height="17"><use href="#lx-disk"/></svg>
+              </span>
+            </div>
+            <div class="lxc-stat-val" id="stDisk">0 GB</div>
+            <div class="lxc-meter"><div class="lxc-meter-fill" id="stDiskBar" style="background:linear-gradient(90deg,#10b981,#22d3ee);"></div></div>
+            <div class="lxc-stat-sub">
+              <span>Quota: <%= instance.diskGb %> GB</span>
+              <span>Driver: <%= _cfg.backingStore || 'dir' %></span>
+            </div>
+          </div>
+
+          <div class="lxc-stat">
+            <div class="lxc-stat-head">
+              <span class="lxc-stat-label">Network Traffic</span>
+              <span class="lxc-stat-icon" style="background:rgba(245,158,11,0.15);color:#fbbf24;">
+                <svg width="17" height="17"><use href="#lx-net"/></svg>
+              </span>
+            </div>
+            <div class="lxc-stat-val" style="font-size:16.5px;" id="stNet">RX 0 B / TX 0 B</div>
+            <div class="lxc-meter"><div class="lxc-meter-fill" style="width:100%;background:rgba(245,158,11,0.28);"></div></div>
+            <div class="lxc-stat-sub">
+              <span>SSH Port: 22</span>
+              <span>Exp: <%= instance.expiresAt ? String(instance.expiresAt).slice(0, 10) : 'Never' %></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ICON NAVIGATION TABS -->
+        <div class="lxc-tabs" role="tablist">
+          <button type="button" class="lxc-tab active" data-pane="overview" onclick="switchPane('overview', this)">
+            <svg width="14" height="14"><use href="#lx-grid"/></svg> Overview &amp; Specs
+          </button>
+          <button type="button" class="lxc-tab" data-pane="access" onclick="switchPane('access', this)">
+            <svg width="14" height="14"><use href="#lx-key"/></svg> Credentials &amp; Reinstall
+          </button>
+          <button type="button" class="lxc-tab" data-pane="files" onclick="switchPane('files', this); loadFiles('/')">
+            <svg width="14" height="14"><use href="#lx-folder"/></svg> Rootfs File Manager
+          </button>
+          <button type="button" class="lxc-tab" data-pane="snapshots" onclick="switchPane('snapshots', this); loadSnapsAndBackups()">
+            <svg width="14" height="14"><use href="#lx-camera"/></svg> Snapshots &amp; Backups
+          </button>
+          <button type="button" class="lxc-tab" data-pane="processes" onclick="switchPane('processes', this); loadProcsAndLogs()">
+            <svg width="14" height="14"><use href="#lx-activity"/></svg> Processes &amp; Logs
+          </button>
+          <button type="button" class="lxc-tab" data-pane="sharing" onclick="switchPane('sharing', this)">
+            <svg width="14" height="14"><use href="#lx-users"/></svg> Access Sharing
+          </button>
+          <% if (isStaff) { %>
+          <button type="button" class="lxc-tab" data-pane="resources" onclick="switchPane('resources', this)">
+            <svg width="14" height="14"><use href="#lx-sliders"/></svg> Resources &amp; KVM
+          </button>
+          <% } %>
+        </div>
+
+        <!-- PANE 1: OVERVIEW & SPECS -->
+        <div id="pane-overview" class="lxc-pane active">
+          <div class="lxc-grid-2">
+            <div class="lxc-card">
+              <div class="lxc-card-head">
+                <div>
+                  <h3 class="lxc-card-title"><svg width="16" height="16"><use href="#lx-cpu"/></svg> Compute &amp; Container Architecture</h3>
+                  <p class="lxc-card-sub">Hardware quota allocation, OS rootfs profile, and cgroup isolation settings.</p>
+                </div>
+              </div>
+              <div class="lxc-kv-list">
+                <div class="lxc-kv-row"><span class="lxc-kv-k">Container Name</span><span class="lxc-kv-v"><code><%= instance.name %></code></span></div>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">Guest Hostname</span><span class="lxc-kv-v"><code><%= instance.hostname %></code></span></div>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">OS Template &amp; Arch</span><span class="lxc-kv-v"><%= instance.osLabel %> &bull; <code><%= _cfg.arch || 'amd64' %></code></span></div>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">vCPU Allocation</span><span class="lxc-kv-v"><%= instance.cpuCores %> vCPU (<%= _cfg.cpuLimitPercent || 100 %>% cap &bull; <%= _cfg.cpuShares || 1024 %> shares)</span></div>
+                <% if (_cfg.cpuPinning) { %>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">CPU Core Pinning</span><span class="lxc-kv-v"><code><%= _cfg.cpuPinning %></code></span></div>
+                <% } %>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">Memory / Swap</span><span class="lxc-kv-v"><%= instance.ramMb %> MB RAM &bull; <%= instance.swapMb %> MB Swap</span></div>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">Rootfs Disk Quota</span><span class="lxc-kv-v"><%= instance.diskGb %> GB (<%= _cfg.backingStore || 'dir' %>)</span></div>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">Created At</span><span class="lxc-kv-v"><%= instance.createdAt || '—' %></span></div>
+              </div>
+            </div>
+
+            <div class="lxc-card">
+              <div class="lxc-card-head">
+                <div>
+                  <h3 class="lxc-card-title"><svg width="16" height="16"><use href="#lx-net"/></svg> Networking &amp; Nested Virtualization</h3>
+                  <p class="lxc-card-sub">Bridge connectivity, NAT &amp; DNS resolver health, Docker nesting, and <code>/dev/kvm</code> passthrough.</p>
+                </div>
+                <div style="display:flex;gap:7px;flex-wrap:wrap;">
+                  <button type="button" id="btnRepairNet" class="lxc-chip-btn" onclick="repairNetwork()">Repair Network &amp; DNS</button>
+                  <% if (isStaff) { %>
+                  <button type="button" class="lxc-chip-btn" onclick="jumpToPane('resources')">Configure &rarr;</button>
+                  <% } %>
+                </div>
+              </div>
+              <div class="lxc-kv-list">
+                <div class="lxc-kv-row"><span class="lxc-kv-k">Compute Node</span><span class="lxc-kv-v"><%= instance.nodeName %> (#<%= instance.nodeId %>)</span></div>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">Linux Bridge</span><span class="lxc-kv-v"><code><%= _cfg.bridge || 'lxcbr0' %></code><%= _cfg.vlanId ? ' (VLAN ' + _cfg.vlanId + ')' : '' %></span></div>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">IPv4 Address</span><span class="lxc-kv-v"><code id="kvIpv4"><%= instance.primaryIp || 'DHCP / Dynamic' %></code></span></div>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">IPv4 Gateway</span><span class="lxc-kv-v"><code id="kvGateway"><%= _cfg.gateway || 'Auto / Bridge Default' %></code></span></div>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">MAC Address</span><span class="lxc-kv-v"><code><%= _cfg.macAddress || 'Auto' %></code></span></div>
+                <div class="lxc-kv-row">
+                  <span class="lxc-kv-k">Container Nesting (Docker/Podman)</span>
+                  <span class="lxc-kv-v"><span class="lxc-badge <%= _cfg.nesting !== false ? 'on' : 'off' %>"><%= _cfg.nesting !== false ? 'Enabled' : 'Disabled' %></span></span>
+                </div>
+                <div class="lxc-kv-row">
+                  <span class="lxc-kv-k">KVM Hardware Nesting (<code>/dev/kvm</code>)</span>
+                  <span class="lxc-kv-v">
+                    <span class="lxc-badge <%= _cfg.kvmNesting ? 'on' : 'off' %>"><%= _cfg.kvmNesting ? 'Enabled (/dev/kvm + /dev/net/tun)' : 'Disabled' %></span>
+                  </span>
+                </div>
+                <div class="lxc-kv-row">
+                  <span class="lxc-kv-k">Host Boot Autostart</span>
+                  <span class="lxc-kv-v"><span class="lxc-badge <%= _cfg.autostart ? 'on' : 'off' %>"><%= _cfg.autostart ? 'Enabled' : 'Disabled' %></span></span>
+                </div>
+                <div class="lxc-kv-row"><span class="lxc-kv-k">Expiration Policy</span><span class="lxc-kv-v"><%= instance.expiresAt || 'Never expires' %></span></div>
+              </div>
+            </div>
+          </div>
+
+          <% if (_cfg.notes && isStaff) { %>
+          <div class="lxc-card" style="padding:14px 18px;">
+            <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px;">Internal Admin Notes</div>
+            <div style="font-size:13px;color:var(--text-primary);"><%= _cfg.notes %></div>
+          </div>
+          <% } %>
+        </div>
+
+        <!-- PANE 2: CREDENTIALS & REINSTALL -->
+        <div id="pane-access" class="lxc-pane">
+          <div class="lxc-grid-2">
+            <!-- Root Password Card -->
+            <div class="lxc-card">
+              <div class="lxc-card-head">
+                <div>
+                  <h3 class="lxc-card-title"><svg width="16" height="16"><use href="#lx-key"/></svg> Reset Container Root Password</h3>
+                  <p class="lxc-card-sub">Updates <code>root</code> via <code>chpasswd</code> (running) or SHA-512 <code>/etc/shadow</code> (stopped).</p>
+                </div>
+                <button type="button" class="lxc-chip-btn" onclick="genDetailPassword()">Generate Strong</button>
+              </div>
+
+              <div class="lxc-field" style="margin-bottom:12px;">
+                <label>New Root Password (Optional)</label>
+                <div style="position:relative;">
+                  <input id="newRootPass" class="lxc-input" type="password" placeholder="Leave blank to auto-generate an 18-char password" autocomplete="new-password" style="padding-right:58px;">
+                  <button type="button" id="togglePassBtn" onclick="toggleDetailPassVis()"
+                    style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);font-size:11.5px;font-weight:600;cursor:pointer;">
+                    Show
+                  </button>
+                </div>
+              </div>
+              <button type="button" class="btn btn-primary" onclick="resetPass()">Apply Root Password</button>
+
+              <div id="passResultBox" style="display:none;margin-top:14px;padding:11px 13px;border-radius:10px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);align-items:center;justify-content:space-between;gap:10px;">
+                <pre id="passResult" style="margin:0;font-family:monospace;font-size:12.5px;color:#34d399;white-space:pre-wrap;word-break:break-all;"></pre>
+                <button type="button" class="lxc-chip-btn" onclick="copyLastResetPass()">Copy</button>
+              </div>
+            </div>
+
+            <!-- SSH Public Key Card -->
+            <div class="lxc-card">
+              <div class="lxc-card-head">
+                <div>
+                  <h3 class="lxc-card-title">Inject OpenSSH Public Key</h3>
+                  <p class="lxc-card-sub">Appends key directly into <code>/root/.ssh/authorized_keys</code> with <code>0600</code> permissions.</p>
+                </div>
+              </div>
+              <div class="lxc-field" style="margin-bottom:12px;">
+                <label>Public Key (<code>ssh-ed25519</code>, <code>ssh-rsa</code>, or <code>ecdsa</code>)</label>
+                <textarea id="sshPubKey" rows="3" placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@workstation" style="font-family:monospace;font-size:12px;"></textarea>
+              </div>
+              <button type="button" class="btn btn-outline" onclick="addSshKey()">Inject SSH Key</button>
+            </div>
+          </div>
+
+          <!-- Reinstall OS Card -->
+          <div class="lxc-card" style="border-color:rgba(239,68,68,0.28);margin-top:16px;">
+            <div class="lxc-card-head">
+              <div>
+                <h3 class="lxc-card-title" style="color:#f87171;">Reinstall Container Operating System</h3>
+                <p class="lxc-card-sub">Destroys the existing container rootfs and deploys a fresh OS image while preserving IP, resources &amp; nesting settings.</p>
+              </div>
+            </div>
+
+            <div class="lxc-form-grid" style="align-items:end;">
+              <div class="lxc-field">
+                <label>Target OS Template</label>
+                <select id="reinstallTpl">
+                  <% (templates || []).forEach(t => {
+                    const isCurrent = (t.slug === instance.osLabel) || (t.image_alias && t.image_alias === instance.osLabel);
+                  %>
+                  <option value="<%= t.slug %>" <%= isCurrent ? 'selected' : '' %>><%= t.name %> (<%= t.slug %>)</option>
+                  <% }) %>
+                </select>
+              </div>
+              <div class="lxc-field">
+                <label>New Root Password (Optional)</label>
+                <input id="reinstallPass" type="password" placeholder="Blank = auto-generate strong password" autocomplete="new-password">
+              </div>
+              <div>
+                <button type="button" class="lxc-btn lxc-btn-stop" style="width:100%;justify-content:center;padding:10px 14px;" onclick="reinstallContainer()">
+                  Destroy Rootfs &amp; Reinstall OS
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANE 3: CONFINED ROOTFS FILE MANAGER -->
+        <div id="pane-files" class="lxc-pane">
+          <div class="lxc-card">
+            <div class="lxc-card-head">
+              <div>
+                <h3 class="lxc-card-title"><svg width="16" height="16"><use href="#lx-folder"/></svg> Confined Rootfs File Browser</h3>
+                <p class="lxc-card-sub">Symlink-confined direct access to container root filesystem without SSH.</p>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-outline" onclick="goUpDir()">&uarr; Up</button>
+                <button type="button" class="btn btn-outline" onclick="loadFiles('/')">Root (/)</button>
+                <button type="button" class="btn btn-primary" onclick="toggleNewFileBar()">+ New / Edit File</button>
+              </div>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+              <div class="lxc-breadcrumbs" id="fileBreadcrumbs">
+                <span style="color:var(--text-muted);font-size:11.5px;">Path:</span>
+                <code id="curFilePath">/</code>
+              </div>
+            </div>
+
+            <div id="newFileBar" style="display:none;margin-bottom:14px;padding:12px;border-radius:10px;background:var(--bg-secondary);border:1px solid var(--border-color);">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <input id="newFilePathInput" class="lxc-input" style="flex:1;min-width:220px;font-family:monospace;" placeholder="/etc/nginx/conf.d/app.conf">
+                <button type="button" class="btn btn-primary" onclick="startNewFileEdit()">Open in Editor</button>
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('newFileBar').style.display='none'">Cancel</button>
+              </div>
+            </div>
+
+            <div class="lxc-table-wrap">
+              <table class="lxc-table">
+                <thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
+                <tbody id="filesBody"></tbody>
+              </table>
+            </div>
+
+            <div id="editorBox" style="display:none;margin-top:16px;padding-top:14px;border-top:1px solid var(--border-subtle);">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="font-size:12.5px;color:var(--text-secondary);">Editing File: <code id="editTarget" style="color:#22d3ee;"></code></div>
+              </div>
+              <textarea id="editContent" rows="13" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12.5px;padding:12px;border-radius:10px;background:#09090f;color:#e5e7eb;border:1px solid var(--border-color);"></textarea>
+              <div style="margin-top:10px;display:flex;gap:8px;">
+                <button type="button" class="btn btn-primary" onclick="saveFileContent()">Save File</button>
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('editorBox').style.display='none'">Close Editor</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANE 4: SNAPSHOTS & BACKUPS -->
+        <div id="pane-snapshots" class="lxc-pane">
+          <div class="lxc-card">
+            <div class="lxc-card-head">
+              <div>
+                <h3 class="lxc-card-title"><svg width="16" height="16"><use href="#lx-camera"/></svg> Container Snapshots</h3>
+                <p class="lxc-card-sub">Point-in-time rootfs snapshots (Quota limit: <%= _cfg.snapshotLimit || 5 %> snapshots).</p>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <input id="snapNoteInput" class="lxc-input" style="width:220px;" placeholder="Snapshot note (e.g. pre-upgrade)">
+                <button type="button" class="btn btn-primary" onclick="createSnap()">+ Take Snapshot</button>
+              </div>
+            </div>
+            <div class="lxc-table-wrap">
+              <table class="lxc-table">
+                <thead><tr><th>Name</th><th>Description</th><th>Created</th><th>Actions</th></tr></thead>
+                <tbody id="lxcSnapsBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="lxc-card">
+            <div class="lxc-card-head">
+              <div>
+                <h3 class="lxc-card-title">SHA-256 Verified Archive Backups</h3>
+                <p class="lxc-card-sub">Full compressed <code>.tar.gz</code> container backups with cryptographic integrity verification &amp; clean rootfs restore.</p>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <input id="bkpLabelInput" class="lxc-input" style="width:190px;" placeholder="Label (optional)">
+                <button type="button" class="btn btn-outline" onclick="createBkp()">+ Create Archive Backup</button>
+              </div>
+            </div>
+            <div class="lxc-table-wrap">
+              <table class="lxc-table">
+                <thead><tr><th>Backup Name</th><th>Size</th><th>SHA-256 Checksum</th><th>Created</th><th>Actions</th></tr></thead>
+                <tbody id="lxcBkpsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANE 5: PROCESSES & LOGS -->
+        <div id="pane-processes" class="lxc-pane">
+          <div class="lxc-card">
+            <div class="lxc-card-head">
+              <div>
+                <h3 class="lxc-card-title"><svg width="16" height="16"><use href="#lx-activity"/></svg> Live Container Process Table (<code>ps</code>)</h3>
+                <p class="lxc-card-sub">Real-time processes executing inside the container namespace.</p>
+              </div>
+              <button type="button" class="btn btn-outline" onclick="loadProcsAndLogs()">Refresh Processes &amp; Logs</button>
+            </div>
+            <div class="lxc-table-wrap">
+              <table class="lxc-table">
+                <thead><tr><th>PID</th><th>User</th><th>CPU %</th><th>MEM %</th><th>Command</th></tr></thead>
+                <tbody id="procsBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="lxc-card">
+            <div class="lxc-card-head">
+              <div>
+                <h3 class="lxc-card-title">Container Runtime Logs</h3>
+                <p class="lxc-card-sub">Tail of liblxc console &amp; startup events for <code><%= instance.name %></code>.</p>
+              </div>
+            </div>
+            <pre id="logsPre" style="margin:0;padding:14px;background:#09090f;border:1px solid var(--border-subtle);border-radius:10px;max-height:320px;overflow-y:auto;font-size:12px;color:#cbd5e1;font-family:monospace;"></pre>
+          </div>
+        </div>
+
+        <!-- PANE 6: SHARING -->
+        <div id="pane-sharing" class="lxc-pane">
+          <div class="lxc-card">
+            <div class="lxc-card-head">
+              <div>
+                <h3 class="lxc-card-title"><svg width="16" height="16"><use href="#lx-users"/></svg> Co-Owner &amp; Team Access Sharing</h3>
+                <p class="lxc-card-sub">Grant other TGVPANEL user accounts permission to view telemetry, open the PTY console, and control power state.</p>
+              </div>
+            </div>
+            <div class="lxc-field" style="max-width:520px;margin-bottom:12px;">
+              <label>Authorized TGVPANEL User IDs (comma-separated)</label>
+              <input id="shareIdsInput" value="<%= (instance.sharedWith || []).join(', ') %>" placeholder="e.g. 2, 5, 12">
+            </div>
+            <button type="button" class="btn btn-primary" onclick="saveSharing()">Save Sharing Permissions</button>
+          </div>
+        </div>
+
+        <% if (isStaff) { %>
+        <!-- PANE 7: RESOURCES, NETWORK & KVM NESTING (STAFF ONLY) -->
+        <div id="pane-resources" class="lxc-pane">
+          <div class="lxc-card">
+            <div class="lxc-card-head">
+              <div>
+                <h3 class="lxc-card-title"><svg width="16" height="16"><use href="#lx-sliders"/></svg> Resources, Networking &amp; KVM Hardware Nesting</h3>
+                <p class="lxc-card-sub">Adjust live cgroup CPU/RAM quotas, bridge IP configuration, Docker nesting, and <code>/dev/kvm</code> hardware virtualization passthrough.</p>
+              </div>
+            </div>
+
+            <form onsubmit="saveResources(event, false)">
+              <div class="lxc-form-grid">
+                <div class="lxc-field"><label>vCPU Cores</label><input id="resCpu" type="number" min="1" max="128" value="<%= instance.cpuCores %>" required></div>
+                <div class="lxc-field"><label>CPU Cap (%)</label><input id="resCpuPct" type="number" min="5" max="100" value="<%= _cfg.cpuLimitPercent || 100 %>" required></div>
+                <div class="lxc-field"><label>CPU Shares</label><input id="resCpuShares" type="number" min="64" max="65536" value="<%= _cfg.cpuShares || 1024 %>" required></div>
+                <div class="lxc-field"><label>RAM Quota (MB)</label><input id="resRam" type="number" min="64" step="64" value="<%= instance.ramMb %>" required></div>
+                <div class="lxc-field"><label>Swap Quota (MB)</label><input id="resSwap" type="number" min="0" step="64" value="<%= instance.swapMb %>" required></div>
+                <div class="lxc-field"><label>Rootfs Disk Quota (GB)</label><input id="resDisk" type="number" min="1" value="<%= instance.diskGb %>" required></div>
+                <div class="lxc-field"><label>Linux Bridge</label><input id="resBridge" value="<%= _cfg.bridge || 'lxcbr0' %>" required></div>
+                <div class="lxc-field"><label>Static IPv4 / CIDR (blank = DHCP)</label><input id="resIp" value="<%= _cfg.ipAddress || '' %>" placeholder="e.g. 10.0.3.25/24"></div>
+                <div class="lxc-field"><label>IPv4 Gateway</label><input id="resGw" value="<%= _cfg.gateway || '' %>" placeholder="e.g. 10.0.3.1"></div>
+              </div>
+
+              <div class="lxc-toggle-grid">
+                <label class="lxc-toggle-card">
+                  <div>
+                    <div style="font-size:13px;font-weight:700;color:var(--text-primary);">Container Nesting (Docker / Podman)</div>
+                    <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">Enables nested cgroup &amp; proc/sys mounts inside LXC.</div>
+                  </div>
+                  <input type="checkbox" id="resNesting" <%= _cfg.nesting !== false ? 'checked' : '' %>>
+                </label>
+
+                <label class="lxc-toggle-card">
+                  <div>
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                      <span style="font-size:13px;font-weight:700;color:var(--text-primary);">KVM Nesting (<code>/dev/kvm</code> Passthrough)</span>
+                      <% if (typeof hostKvmAvailable !== 'undefined' && hostKvmAvailable) { %>
+                        <span class="lxc-badge on" style="font-size:10px;padding:1px 7px;">Host /dev/kvm Ready</span>
+                      <% } else { %>
+                        <span class="lxc-badge warn" style="font-size:10px;padding:1px 7px;">No Host /dev/kvm</span>
+                      <% } %>
+                    </div>
+                    <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">Binds <code>/dev/kvm</code> &amp; <code>/dev/net/tun</code> (<code>c 10:232 rwm</code>) so QEMU/KVM runs with hardware acceleration.</div>
+                  </div>
+                  <input type="checkbox" id="resKvmNesting" <%= _cfg.kvmNesting ? 'checked' : '' %>>
+                </label>
+
+                <label class="lxc-toggle-card">
+                  <div>
+                    <div style="font-size:13px;font-weight:700;color:var(--text-primary);">Boot Automatically with Host</div>
+                    <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">Sets <code>lxc.start.auto = 1</code> on compute node boot.</div>
+                  </div>
+                  <input type="checkbox" id="resAutostart" <%= _cfg.autostart ? 'checked' : '' %>>
+                </label>
+              </div>
+
+              <div style="font-size:12px;color:var(--text-muted);margin-top:12px;">
+                Tip: CPU &amp; RAM limits apply live immediately; use <strong>Save &amp; Restart Container</strong> after toggling KVM <code>/dev/kvm</code> Nesting or static IP settings so new device/network mounts attach cleanly.
+              </div>
+
+              <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+                <button type="submit" class="btn btn-primary">Save Configuration</button>
+                <button type="button" class="lxc-btn lxc-btn-restart" onclick="saveResources(null, true)">
+                  <svg width="13" height="13"><use href="#lx-restart"/></svg>
+                  <span>Save &amp; Restart Container</span>
+                </button>
+                <button type="button" class="lxc-btn lxc-btn-freeze" onclick="repairNetwork()">
+                  <svg width="13" height="13"><use href="#lx-net"/></svg>
+                  <span>Repair Network &amp; DNS</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+        <% } %>
+
+      </div>
+    </div>
+    <%- include('../partials/admin/footer') %>
+  </div>
+</div>
+
+<script>
+const LXC_ID = <%= instance.refId %>;
+const DISK_QUOTA_GB = <%= Number(instance.diskGb || 20) %>;
+let __lastResetPw = '';
+
+function switchPane(name, btn) {
+  document.querySelectorAll('.lxc-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.lxc-tab').forEach(b => b.classList.remove('active'));
+  const target = document.getElementById('pane-' + name);
+  if (target) target.classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+function jumpToPane(name) {
+  const btn = document.querySelector('.lxc-tab[data-pane="' + name + '"]');
+  switchPane(name, btn);
+}
+
+function formatBytesHuman(bytes) {
+  const b = Number(bytes || 0);
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(2) + ' MB';
+  return (b / 1073741824).toFixed(2) + ' GB';
+}
+
+function copyText(txt, msg) {
+  if (!txt) return;
+  navigator.clipboard.writeText(txt).then(() => {
+    hkvmToast(msg || 'Copied to clipboard');
+  }).catch(() => {});
+}
+
+function applyStatusUi(status, pid) {
+  const s = String(status || 'stopped').toLowerCase();
+  const statusEl = document.getElementById('hdrStatus');
+  const pillEl = document.getElementById('hdrStatusPill');
+  if (statusEl) statusEl.textContent = s;
+  if (pillEl) {
+    pillEl.className = 'lxc-status-pill ' + (
+      s === 'running' ? 'st-running' :
+      s === 'frozen' ? 'st-frozen' :
+      s === 'suspended' ? 'st-suspended' : 'st-stopped'
+    );
+  }
+  const pidWrap = document.getElementById('hdrPidWrap');
+  const pidEl = document.getElementById('hdrPid');
+  if (pidWrap && pidEl) {
+    if (pid && Number(pid) > 0) {
+      pidWrap.style.display = 'inline-flex';
+      pidEl.textContent = pid;
+    } else {
+      pidWrap.style.display = 'none';
+    }
+  }
+  const btnFreeze = document.getElementById('btnFreeze');
+  const btnUnfreeze = document.getElementById('btnUnfreeze');
+  if (btnFreeze && btnUnfreeze) {
+    btnFreeze.style.display = s === 'frozen' ? 'none' : 'inline-flex';
+    btnUnfreeze.style.display = s === 'frozen' ? 'inline-flex' : 'none';
+  }
+}
+
+function formatCpuLoadPercent(pct, status) {
+  const s = String(status || 'stopped').toLowerCase();
+  const n = Number(pct || 0);
+  if (s !== 'running' || !Number.isFinite(n) || n <= 0) return '0%';
+  if (n < 1) return n.toFixed(2) + '%';
+  return n.toFixed(1).replace(/\.0$/, '') + '%';
+}
+
+let _telemetryInFlight = false;
+
+async function refreshTelemetry() {
+  if (_telemetryInFlight) return;
+  _telemetryInFlight = true;
+  try {
+    const { telemetry: t } = await hkvmApi(`/api/v1/instances/lxc/${LXC_ID}/telemetry`);
+    applyStatusUi(t.status, t.pid);
+    const rawCpuPct = Math.min(100, Math.max(0, Number(t.cpuPercent || 0)));
+    document.getElementById('stCpu').textContent = formatCpuLoadPercent(rawCpuPct, t.status);
+    document.getElementById('stRam').textContent = t.ramUsedMb + ' MB (' + t.ramPercent + '%)';
+    document.getElementById('stDisk').textContent = t.diskUsedGb + ' GB';
+    document.getElementById('stNet').textContent =
+      'RX ' + formatBytesHuman(t.netRxBytes) + ' / TX ' + formatBytesHuman(t.netTxBytes);
+
+    if (t.primaryIp) {
+      const hdrIp = document.getElementById('hdrIp');
+      const kvIp = document.getElementById('kvIpv4');
+      if (hdrIp) hdrIp.textContent = t.primaryIp;
+      if (kvIp) kvIp.textContent = t.primaryIp;
+    }
+    const cpuBar = document.getElementById('stCpuBar');
+    const ramBar = document.getElementById('stRamBar');
+    const diskBar = document.getElementById('stDiskBar');
+    if (cpuBar) {
+      cpuBar.style.width = (rawCpuPct > 0 ? Math.max(1.5, rawCpuPct) : 0) + '%';
+    }
+    if (ramBar) ramBar.style.width = Math.min(100, Math.max(0, Number(t.ramPercent || 0))) + '%';
+    if (diskBar) {
+      const diskPct = DISK_QUOTA_GB > 0 ? Math.min(100, Math.round((Number(t.diskUsedGb || 0) / DISK_QUOTA_GB) * 100)) : 0;
+      diskBar.style.width = diskPct + '%';
+    }
+  } catch (_e) {
+  } finally {
+    _telemetryInFlight = false;
+  }
+}
+
+async function doLxcAction(action) {
+  try {
+    const out = await hkvmApi(`/api/v1/instances/lxc/${LXC_ID}/action`, { method: 'POST', body: { action } });
+    hkvmToast('Action "' + action + '" completed');
+    if (out && out.instance) applyStatusUi(out.instance.status, null);
+    refreshTelemetry();
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function repairNetwork() {
+  const btn = document.getElementById('btnRepairNet');
+  if (btn) btn.disabled = true;
+  try {
+    const out = await hkvmApi(`/api/v1/lxc/${LXC_ID}/repair-network`, { method: 'POST', body: {} });
+    const r = out.repair || {};
+    if (r.ipv4Address) {
+      const hdrIp = document.getElementById('hdrIp');
+      const kvIp = document.getElementById('kvIpv4');
+      if (hdrIp) hdrIp.textContent = r.ipv4Address;
+      if (kvIp) kvIp.textContent = r.ipv4Address;
+    }
+    if (r.gateway) {
+      const kvGw = document.getElementById('kvGateway');
+      if (kvGw) kvGw.textContent = r.gateway;
+    }
+    const dnsTxt = Array.isArray(r.dnsServers) && r.dnsServers.length ? r.dnsServers.join(', ') : '1.1.1.1, 8.8.8.8';
+    hkvmToast('Network & DNS repaired (' + (r.ipv4Address || 'DHCP') + ' • DNS: ' + dnsTxt + ')');
+    refreshTelemetry();
+  } catch (e) {
+    hkvmToast(e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function genDetailPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
+  const arr = new Uint32Array(18);
+  window.crypto.getRandomValues(arr);
+  let pw = '';
+  for (let i = 0; i < arr.length; i++) pw += chars[arr[i] % chars.length];
+  const el = document.getElementById('newRootPass');
+  el.value = pw;
+  el.type = 'text';
+  document.getElementById('togglePassBtn').textContent = 'Hide';
+}
+
+function toggleDetailPassVis() {
+  const el = document.getElementById('newRootPass');
+  const btn = document.getElementById('togglePassBtn');
+  el.type = el.type === 'password' ? 'text' : 'password';
+  btn.textContent = el.type === 'password' ? 'Show' : 'Hide';
+}
+
+function copyLastResetPass() {
+  copyText(__lastResetPw, 'Root password copied to clipboard');
+}
+
+async function resetPass() {
+  try {
+    const out = await hkvmApi(`/api/v1/lxc/${LXC_ID}/password`, {
+      method: 'POST',
+      body: { password: document.getElementById('newRootPass').value || undefined }
+    });
+    __lastResetPw = out.rootPassword;
+    const box = document.getElementById('passResultBox');
+    const pre = document.getElementById('passResult');
+    box.style.display = 'flex';
+    pre.textContent = 'New Root Password: ' + out.rootPassword;
+    hkvmToast('Root password updated');
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function addSshKey() {
+  try {
+    await hkvmApi(`/api/v1/lxc/${LXC_ID}/ssh-key`, {
+      method: 'POST',
+      body: { publicKey: document.getElementById('sshPubKey').value }
+    });
+    document.getElementById('sshPubKey').value = '';
+    hkvmToast('SSH public key injected into /root/.ssh/authorized_keys');
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function reinstallContainer() {
+  if (!confirm('WARNING: All current files inside this LXC container will be permanently erased and reinstalled. Continue?')) return;
+  try {
+    const customPw = (document.getElementById('reinstallPass')?.value || '').trim();
+    const out = await hkvmApi(`/api/v1/lxc/${LXC_ID}/reinstall`, {
+      method: 'POST',
+      body: {
+        templateSlug: document.getElementById('reinstallTpl').value,
+        rootPassword: customPw || undefined
+      }
+    });
+    __lastResetPw = out.rootPassword;
+    const box = document.getElementById('passResultBox');
+    const pre = document.getElementById('passResult');
+    box.style.display = 'flex';
+    pre.textContent = 'Reinstalled! New Root Password: ' + out.rootPassword;
+    hkvmToast('Container reinstalled successfully');
+    refreshTelemetry();
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+function renderBreadcrumbs(curPath) {
+  const wrap = document.getElementById('fileBreadcrumbs');
+  const parts = String(curPath || '/').split('/').filter(Boolean);
+  let html = '<span style="color:var(--text-muted);font-size:11.5px;">Path:</span> ';
+  html += `<button type="button" class="lxc-crumb" onclick="loadFiles('/')">/</button>`;
+  let acc = '';
+  for (const p of parts) {
+    acc += '/' + p;
+    html += `<span style="color:var(--text-muted);">/</span><button type="button" class="lxc-crumb" onclick="loadFiles('${hkvmEsc(acc)}')">${hkvmEsc(p)}</button>`;
+  }
+  html += `<code id="curFilePath" style="display:none;">${hkvmEsc(curPath || '/')}</code>`;
+  wrap.innerHTML = html;
+}
+
+function goUpDir() {
+  const cur = document.getElementById('curFilePath')?.textContent || '/';
+  if (cur === '/' || !cur) return loadFiles('/');
+  const idx = cur.lastIndexOf('/');
+  loadFiles(idx <= 0 ? '/' : cur.slice(0, idx));
+}
+
+function toggleNewFileBar() {
+  const cur = document.getElementById('curFilePath')?.textContent || '/';
+  const bar = document.getElementById('newFileBar');
+  const inp = document.getElementById('newFilePathInput');
+  bar.style.display = bar.style.display === 'none' ? 'block' : 'none';
+  inp.value = (cur === '/' ? '/' : cur + '/') + 'new-file.conf';
+  inp.focus();
+}
+
+function startNewFileEdit() {
+  const target = (document.getElementById('newFilePathInput').value || '').trim();
+  if (!target) return;
+  document.getElementById('newFileBar').style.display = 'none';
+  document.getElementById('editorBox').style.display = 'block';
+  document.getElementById('editTarget').textContent = target;
+  document.getElementById('editContent').value = '';
+}
+
+async function loadFiles(subPath) {
+  try {
+    const data = await hkvmApi(`/api/v1/lxc/${LXC_ID}/files?path=${encodeURIComponent(subPath)}`);
+    renderBreadcrumbs(data.path);
+    if (!data.entries.length) {
+      document.getElementById('filesBody').innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:18px;">Directory is empty.</td></tr>';
+      return;
+    }
+    document.getElementById('filesBody').innerHTML = data.entries.map(ent => `<tr>
+      <td>${ent.isDirectory ? '📁' : '📄'} <strong>${hkvmEsc(ent.name)}</strong></td>
+      <td><span class="lxc-badge ${ent.isDirectory ? 'off' : 'on'}">${ent.isDirectory ? 'Directory' : 'File'}</span></td>
+      <td>${ent.isDirectory ? '—' : formatBytesHuman(ent.size)}</td>
+      <td style="color:var(--text-muted);font-size:12px;">${hkvmEsc(String(ent.modifiedAt || '').replace('T', ' ').slice(0, 19))}</td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${ent.isDirectory
+          ? `<button type="button" class="btn btn-outline" style="padding:5px 10px;font-size:12px;" onclick="loadFiles('${hkvmEsc(ent.path)}')">Open</button>`
+          : `<button type="button" class="btn btn-outline" style="padding:5px 10px;font-size:12px;" onclick="openEditor('${hkvmEsc(ent.path)}')">Edit</button>`}
+        <button type="button" class="btn btn-outline" style="padding:5px 10px;font-size:12px;color:#f87171;" onclick="removeFile('${hkvmEsc(ent.path)}')">Delete</button>
+      </td>
+    </tr>`).join('');
+  } catch (e) {
+    document.getElementById('filesBody').innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);">${hkvmEsc(e.message)}</td></tr>`;
+  }
+}
+
+async function openEditor(filePath) {
+  try {
+    const data = await hkvmApi(`/api/v1/lxc/${LXC_ID}/files/content?path=${encodeURIComponent(filePath)}`);
+    document.getElementById('editorBox').style.display = 'block';
+    document.getElementById('editTarget').textContent = filePath;
+    document.getElementById('editContent').value = data.content;
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function saveFileContent() {
+  const filePath = document.getElementById('editTarget').textContent;
+  try {
+    await hkvmApi(`/api/v1/lxc/${LXC_ID}/files/content`, {
+      method: 'POST',
+      body: { path: filePath, content: document.getElementById('editContent').value }
+    });
+    hkvmToast('Saved ' + filePath);
+    document.getElementById('editorBox').style.display = 'none';
+    loadFiles(document.getElementById('curFilePath')?.textContent || '/');
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function removeFile(filePath) {
+  if (!confirm('Delete ' + filePath + '?')) return;
+  try {
+    await hkvmApi(`/api/v1/lxc/${LXC_ID}/files?path=${encodeURIComponent(filePath)}`, { method: 'DELETE' });
+    loadFiles(document.getElementById('curFilePath')?.textContent || '/');
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function loadSnapsAndBackups() {
+  const [sRes, bRes] = await Promise.all([
+    hkvmApi(`/api/v1/snapshots/lxc/${LXC_ID}`),
+    hkvmApi(`/api/v1/backups?engine=lxc&refId=${LXC_ID}`)
+  ]);
+  document.getElementById('lxcSnapsBody').innerHTML = sRes.snapshots.length
+    ? sRes.snapshots.map(s => `<tr>
+        <td><code>${hkvmEsc(s.snapshot_name)}</code></td>
+        <td>${hkvmEsc(s.description || '—')}</td>
+        <td style="color:var(--text-muted);font-size:12px;">${hkvmEsc(s.created_at)}</td>
+        <td style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline" style="padding:5px 10px;font-size:12px;" onclick="revertLxcSnap(${s.id})">Restore</button>
+          <button type="button" class="btn btn-outline" style="padding:5px 10px;font-size:12px;color:#f87171;" onclick="deleteLxcSnap(${s.id})">Delete</button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:16px;">No snapshots created yet.</td></tr>';
+
+  document.getElementById('lxcBkpsBody').innerHTML = bRes.backups.length
+    ? bRes.backups.map(b => `<tr>
+        <td><strong>${hkvmEsc(b.backup_name)}</strong></td>
+        <td>${formatBytesHuman(b.size_bytes)}</td>
+        <td>
+          <code>${hkvmEsc((b.checksum_sha256 || '').slice(0, 16))}...</code>
+          ${b.checksum_sha256 ? `<button type="button" class="lxc-copy-mini" title="Copy full SHA-256" onclick="copyText('${hkvmEsc(b.checksum_sha256)}','SHA-256 checksum copied')"><svg width="12" height="12"><use href="#lx-copy"/></svg></button>` : ''}
+        </td>
+        <td style="color:var(--text-muted);font-size:12px;">${hkvmEsc(b.created_at)}</td>
+        <td><button type="button" class="btn btn-outline" style="padding:5px 10px;font-size:12px;" onclick="restoreLxcBkp(${b.id})">Restore</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:16px;">No archive backups created yet.</td></tr>';
+}
+
+async function createSnap() {
+  const desc = (document.getElementById('snapNoteInput')?.value || '').trim() || 'Manual snapshot';
+  try {
+    await hkvmApi(`/api/v1/snapshots/lxc/${LXC_ID}`, { method: 'POST', body: { description: desc } });
+    if (document.getElementById('snapNoteInput')) document.getElementById('snapNoteInput').value = '';
+    hkvmToast('Snapshot created');
+    loadSnapsAndBackups();
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function revertLxcSnap(snapId) {
+  if (!confirm('Revert container rootfs to snapshot #' + snapId + '?')) return;
+  try {
+    await hkvmApi(`/api/v1/snapshots/lxc/${LXC_ID}/${snapId}/restore`, { method: 'POST' });
+    hkvmToast('Snapshot restored');
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function deleteLxcSnap(snapId) {
+  await hkvmApi(`/api/v1/snapshots/lxc/${LXC_ID}/${snapId}`, { method: 'DELETE' });
+  loadSnapsAndBackups();
+}
+
+async function createBkp() {
+  const label = (document.getElementById('bkpLabelInput')?.value || '').trim() || undefined;
+  try {
+    await hkvmApi('/api/v1/backups', { method: 'POST', body: { engine: 'lxc', refId: LXC_ID, label } });
+    if (document.getElementById('bkpLabelInput')) document.getElementById('bkpLabelInput').value = '';
+    hkvmToast('SHA-256 archive backup created');
+    loadSnapsAndBackups();
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function restoreLxcBkp(backupId) {
+  if (!confirm('Verify SHA-256 checksum and restore container rootfs from backup #' + backupId + '?')) return;
+  try {
+    await hkvmApi('/api/v1/backups/' + backupId + '/restore', { method: 'POST' });
+    hkvmToast('Container restored from verified backup archive');
+    refreshTelemetry();
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function loadProcsAndLogs() {
+  try {
+    const pRes = await hkvmApi(`/api/v1/lxc/${LXC_ID}/processes`);
+    document.getElementById('procsBody').innerHTML = pRes.processes.length
+      ? pRes.processes.map(p => `<tr>
+          <td><code>${hkvmEsc(p.pid)}</code></td>
+          <td>${hkvmEsc(p.user)}</td>
+          <td>${hkvmEsc(p.cpu)}%</td>
+          <td>${hkvmEsc(p.mem)}%</td>
+          <td><code>${hkvmEsc(p.command)}</code></td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:16px;">Container is stopped or process table is empty.</td></tr>';
+  } catch (e) {
+    document.getElementById('procsBody').innerHTML = `<tr><td colspan="5" style="color:var(--text-muted);">${hkvmEsc(e.message)}</td></tr>`;
+  }
+  try {
+    const lRes = await hkvmApi(`/api/v1/lxc/${LXC_ID}/logs`);
+    document.getElementById('logsPre').textContent = lRes.logs || 'No container log entries recorded yet.';
+  } catch (_e) {}
+}
+
+async function saveSharing() {
+  const ids = document.getElementById('shareIdsInput').value.split(',').map(s => Number(s.trim())).filter(Boolean);
+  try {
+    await hkvmApi(`/api/v1/lxc/${LXC_ID}/sharing`, { method: 'PUT', body: { userIds: ids } });
+    hkvmToast('Sharing permissions updated');
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function saveResources(e, restartAfter) {
+  if (e) e.preventDefault();
+  try {
+    await hkvmApi(`/api/v1/lxc/${LXC_ID}`, {
+      method: 'PATCH',
+      body: {
+        cpuCores: Number(document.getElementById('resCpu').value),
+        cpuLimitPercent: Number(document.getElementById('resCpuPct').value),
+        cpuShares: Number(document.getElementById('resCpuShares').value),
+        ramMb: Number(document.getElementById('resRam').value),
+        swapMb: Number(document.getElementById('resSwap').value),
+        diskGb: Number(document.getElementById('resDisk').value),
+        bridge: document.getElementById('resBridge').value.trim(),
+        ipAddress: document.getElementById('resIp').value.trim() || null,
+        gateway: document.getElementById('resGw').value.trim() || null,
+        nesting: document.getElementById('resNesting').checked,
+        kvmNesting: document.getElementById('resKvmNesting').checked,
+        autostart: document.getElementById('resAutostart').checked
+      }
+    });
+    if (restartAfter) {
+      hkvmToast('Configuration saved — restarting container to attach updated mounts/network...');
+      await hkvmApi(`/api/v1/instances/lxc/${LXC_ID}/action`, { method: 'POST', body: { action: 'restart' } });
+      hkvmToast('Container restarted with updated configuration');
+    } else {
+      hkvmToast('Container resource, network & KVM nesting settings updated');
+    }
+    setTimeout(() => location.reload(), 650);
+  } catch (err) { hkvmToast(err.message, 'error'); }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  applyStatusUi('<%= instance.status %>', null);
+  refreshTelemetry();
+  setInterval(() => {
+    if (!document.hidden) refreshTelemetry();
+  }, 4000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshTelemetry();
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title || 'TGVPANEL User Panel' %></title>
+  <link rel="icon" href="<%= siteLogo %>" type="image/png">
+  <link rel="stylesheet" href="/css/admin.css">
+  <style>
+    .u3-card { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 12px; padding: 18px; margin-bottom: 18px; }
+    .u3-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; }
+    .u3-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; font-weight: 600; }
+    .u3-field input, .u3-field select { width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary, rgba(255,255,255,0.03)); color: var(--text-primary); font-size: 13px; }
+    .u3-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .u3-table th, .u3-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border-subtle); color: var(--text-primary); }
+    .u3-pill { display: inline-flex; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .u3-pill.kvm { background: rgba(99,102,241,0.16); color: #818cf8; }
+    .u3-pill.lxc { background: rgba(6,182,212,0.16); color: #22d3ee; }
+    .u3-pill.running { background: rgba(16,185,129,0.16); color: #10b981; }
+    .u3-pill.stopped { background: rgba(107,114,128,0.2); color: #9ca3af; }
+    .u3-pill.frozen, .u3-pill.suspended { background: rgba(245,158,11,0.18); color: #f59e0b; }
+  </style>
+</head>
+<body>
+<div class="admin-wrapper">
+  <%- include('../partials/users/sidebar') %>
+  <div class="admin-main">
+    <%- include('../partials/admin/header') %>
+    <div class="admin-content">
+
+      <% if (section === 'instances') { %>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h2 style="margin:0;color:var(--text-primary);">My Virtual Machines &amp; LXC Containers</h2>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">Unified compute dashboard including owned and shared KVM &amp; LXC instances.</p>
+        </div>
+        <select id="uEngineFilter" onchange="loadMyInstances()" style="padding:8px 12px;border-radius:8px;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border-card);">
+          <option value="" <%= (typeof defaultEngine !== 'undefined' && defaultEngine === '') ? 'selected' : '' %>>All Engines (KVM + LXC)</option>
+          <option value="kvm" <%= (typeof defaultEngine !== 'undefined' && defaultEngine === 'kvm') ? 'selected' : '' %>>KVM Virtual Machines</option>
+          <option value="lxc" <%= (typeof defaultEngine !== 'undefined' && defaultEngine === 'lxc') ? 'selected' : '' %>>LXC Containers</option>
+        </select>
+      </div>
+      <div id="myInstGrid" class="u3-grid"></div>
+      <% } %>
+
+      <% if (section === 'ports') { %>
+      <div style="margin-bottom:18px;">
+        <h2 style="margin:0;color:var(--text-primary);">Self-Service NAT Port Forwarding</h2>
+        <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);" id="portQuotaBanner">Loading port allocation...</p>
+      </div>
+      <div class="u3-card">
+        <h3 style="margin-top:0;color:var(--text-primary);">Add Port Forward Rule</h3>
+        <form onsubmit="submitUserPort(event)" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;">
+          <div class="u3-field"><label>Instance</label><select id="pfInst" required></select></div>
+          <div class="u3-field"><label>Guest Internal Port</label><input id="pfGuestPort" type="number" min="1" max="65535" required placeholder="8080"></div>
+          <div class="u3-field"><label>Host Public Port (Optional)</label><input id="pfHostPort" type="number" min="1024" max="65535" placeholder="Auto-assign"></div>
+          <div class="u3-field"><label>Protocol</label><select id="pfProto"><option value="tcp,udp">TCP + UDP</option><option value="tcp">TCP Only</option><option value="udp">UDP Only</option></select></div>
+          <div class="u3-field"><label>Description</label><input id="pfDesc" placeholder="Web / Game Port"></div>
+          <div class="u3-field" style="display:flex;align-items:flex-end;"><button class="btn btn-primary" type="submit" style="width:100%;">Create Forward</button></div>
+        </form>
+      </div>
+      <div class="u3-card" style="overflow-x:auto;">
+        <table class="u3-table">
+          <thead><tr><th>Instance</th><th>Public Port</th><th>Internal Target</th><th>Protocol</th><th>Description</th><th>Delete</th></tr></thead>
+          <tbody id="uPortsBody"></tbody>
+        </table>
+      </div>
+      <% } %>
+
+      <% if (section === 'security') { %>
+      <h2 style="margin:0 0 18px;color:var(--text-primary);">Account Security, Two-Factor Auth &amp; API Keys</h2>
+      <div class="u3-card">
+        <h3 style="margin-top:0;color:var(--text-primary);">Authenticator App (TOTP 2FA) — Status: <span id="tfaBadge"><%= twoFactorEnabled ? 'ENABLED' : 'DISABLED' %></span></h3>
+        <% if (!twoFactorEnabled) { %>
+        <button class="btn btn-primary" onclick="start2faSetup()">Generate Authenticator QR Code</button>
+        <div id="tfaSetupBox" style="display:none;margin-top:14px;">
+          <img id="tfaQrImg" alt="TOTP QR" style="background:#fff;padding:8px;border-radius:8px;display:block;margin-bottom:8px;">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Manual Secret: <code id="tfaSecretCode"></code></div>
+          <div style="display:flex;gap:8px;max-width:320px;">
+            <input id="tfaVerifyInput" placeholder="6-digit code" maxlength="6" style="padding:8px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-primary);">
+            <button class="btn btn-primary" onclick="confirmEnable2fa()">Verify &amp; Enable</button>
+          </div>
+        </div>
+        <% } else { %>
+        <div style="display:flex;gap:8px;max-width:340px;">
+          <input id="tfaDisableCode" placeholder="Enter 6-digit code to disable" maxlength="6" style="padding:8px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-primary);">
+          <button class="btn btn-outline" style="color:#ef4444;" onclick="disable2fa()">Disable 2FA</button>
+        </div>
+        <% } %>
+      </div>
+
+      <div class="u3-card">
+        <h3 style="margin-top:0;color:var(--text-primary);">Personal API Keys</h3>
+        <form onsubmit="createUserApiKey(event)" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px;">
+          <div class="u3-field"><label>Name</label><input id="ukName" required placeholder="CLI Script"></div>
+          <div class="u3-field"><label>Permissions</label><select id="ukPerms"><option value="read">Read-Only</option><option value="read,write">Read + Write</option></select></div>
+          <div class="u3-field" style="display:flex;align-items:flex-end;"><button class="btn btn-primary" type="submit" style="width:100%;">Generate API Key</button></div>
+        </form>
+        <pre id="ukSecretOut" style="display:none;padding:12px;background:rgba(0,0,0,0.3);border-radius:8px;color:#10b981;font-size:12px;"></pre>
+        <table class="u3-table"><thead><tr><th>Prefix</th><th>Name</th><th>Permissions</th><th>Created</th><th>Revoke</th></tr></thead><tbody id="ukTable"></tbody></table>
+      </div>
+      <% } %>
+
+    </div>
+    <%- include('../partials/admin/footer') %>
+  </div>
+</div>
+
+<script>
+const USER_SECTION = '<%= section %>';
+
+async function loadMyInstances() {
+  const eng = document.getElementById('uEngineFilter').value;
+  const data = await hkvmApi('/api/v1/instances' + (eng ? '?engine=' + eng : ''));
+  const grid = document.getElementById('myInstGrid');
+  if (!data.instances.length) {
+    grid.innerHTML = '<div class="u3-card">No compute instances assigned to your account yet.</div>';
+    return;
+  }
+  grid.innerHTML = data.instances.map(i => {
+    const detailHref = i.engine === 'kvm' ? '/vm/' + i.refId : '/lxc/' + i.refId;
+    const consoleHref = i.engine === 'kvm' ? '/vm/' + i.refId + '/console' : '/lxc/' + i.refId + '/console';
+    return `<div class="u3-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span class="u3-pill ${i.engine}">${i.engine.toUpperCase()}</span>
+        <span class="u3-pill ${i.status}">${hkvmEsc(i.status)}</span>
+      </div>
+      <h3 style="margin:0 0 4px;color:var(--text-primary);">${hkvmEsc(i.name)}</h3>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">${hkvmEsc(i.osLabel)} • IP: <code>${hkvmEsc(i.primaryIp || 'Pending')}</code></div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px;">${i.cpuCores} vCPU • ${i.ramMb} MB RAM • ${i.diskGb} GB Storage</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <a class="btn btn-primary" href="${detailHref}">Manage</a>
+        <a class="btn btn-outline" href="${consoleHref}">Console</a>
+        <button class="btn btn-outline" onclick="uAct('${i.engine}',${i.refId},'start')">Start</button>
+        <button class="btn btn-outline" onclick="uAct('${i.engine}',${i.refId},'stop')">Stop</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function uAct(engine, id, action) {
+  try {
+    await hkvmApi(`/api/v1/instances/${engine}/${id}/action`, { method: 'POST', body: { action } });
+    hkvmToast('Instance ' + action + ' succeeded');
+    loadMyInstances();
+  } catch (e) { hkvmToast(e.message, 'error'); }
+}
+
+async function loadUserPorts() {
+  const [instRes, portRes] = await Promise.all([
+    hkvmApi('/api/v1/instances'),
+    hkvmApi('/api/v1/network/ports')
+  ]);
+  document.getElementById('portQuotaBanner').textContent =
+    `Used ${portRes.quota.usedPorts} of ${portRes.quota.allocatedPorts} allocated NAT ports (${portRes.quota.remainingPorts} remaining).`;
+  document.getElementById('pfInst').innerHTML = instRes.instances
+    .map(i => `<option value="${i.engine}:${i.refId}">[${i.engine.toUpperCase()}] ${hkvmEsc(i.name)} (${hkvmEsc(i.primaryIp || 'no-ip')})</option>`)
+    .join('');
+  document.getElementById('uPortsBody').innerHTML = portRes.forwards.length
+    ? portRes.forwards.map(f => `<tr>
+        <td>${hkvmEsc(f.container_name)}</td><td><code>:${f.host_port}</code></td>
+        <td><code>${hkvmEsc(f.guest_ip || '')}:${f.guest_port}</code></td><td>${hkvmEsc(f.protocol)}</td>
+        <td>${hkvmEsc(f.description)}</td>
+        <td><button class="btn btn-outline" style="color:#ef4444;" onclick="delUserPort(${f.id})">Delete</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" style="color:var(--text-muted);">No port forwarding rules created yet.</td></tr>';
+}
+
+async function submitUserPort(e) {
+  e.preventDefault();
+  const [instanceType, instanceRefId] = document.getElementById('pfInst').value.split(':');
+  try {
+    await hkvmApi('/api/v1/network/ports', {
+      method: 'POST',
+      body: {
+        instanceType,
+        instanceRefId: Number(instanceRefId),
+        guestPort: Number(document.getElementById('pfGuestPort').value),
+        hostPort: document.getElementById('pfHostPort').value ? Number(document.getElementById('pfHostPort').value) : undefined,
+        protocol: document.getElementById('pfProto').value,
+        description: document.getElementById('pfDesc').value
+      }
+    });
+    hkvmToast('Port forward rule added');
+    loadUserPorts();
+  } catch (err) { hkvmToast(err.message, 'error'); }
+}
+
+async function delUserPort(id) {
+  await hkvmApi('/api/v1/network/ports/' + id, { method: 'DELETE' });
+  loadUserPorts();
+}
+
+async function start2faSetup() {
+  const out = await hkvmApi('/api/v1/auth/2fa/setup', { method: 'POST' });
+  document.getElementById('tfaSetupBox').style.display = 'block';
+  document.getElementById('tfaQrImg').src = out.qrDataUrl;
+  document.getElementById('tfaSecretCode').textContent = out.secret;
+}
+
+async function confirmEnable2fa() {
+  try {
+    await hkvmApi('/api/v1/auth/2fa/enable', {
+      method: 'POST',
+      body: { code: document.getElementById('tfaVerifyInput').value }
+    });
+    hkvmToast('Two-Factor Authentication enabled!');
+    setTimeout(() => location.reload(), 800);
+  } catch (err) { hkvmToast(err.message, 'error'); }
+}
+
+async function disable2fa() {
+  try {
+    await hkvmApi('/api/v1/auth/2fa/disable', {
+      method: 'POST',
+      body: { code: document.getElementById('tfaDisableCode').value }
+    });
+    location.reload();
+  } catch (err) { hkvmToast(err.message, 'error'); }
+}
+
+async function loadUserKeys() {
+  const data = await hkvmApi('/api/v1/api-keys');
+  document.getElementById('ukTable').innerHTML = data.apiKeys.map(k => `<tr>
+    <td><code>${hkvmEsc(k.key_prefix)}...</code></td><td>${hkvmEsc(k.name)}</td>
+    <td><code>${hkvmEsc(k.permissions)}</code></td><td>${hkvmEsc(k.created_at)}</td>
+    <td><button class="btn btn-outline" onclick="revokeUserKey(${k.id})">Revoke</button></td>
+  </tr>`).join('');
+}
+
+async function createUserApiKey(e) {
+  e.preventDefault();
+  const out = await hkvmApi('/api/v1/api-keys', {
+    method: 'POST',
+    body: {
+      name: document.getElementById('ukName').value,
+      permissions: document.getElementById('ukPerms').value.split(',')
+    }
+  });
+  const pre = document.getElementById('ukSecretOut');
+  pre.style.display = 'block';
+  pre.textContent = 'Copy your API key now (shown once):\n' + out.rawApiKey;
+  loadUserKeys();
+}
+
+async function revokeUserKey(id) {
+  await hkvmApi('/api/v1/api-keys/' + id, { method: 'DELETE' });
+  loadUserKeys();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (USER_SECTION === 'instances') loadMyInstances();
+  if (USER_SECTION === 'ports') loadUserPorts();
+  if (USER_SECTION === 'security') loadUserKeys();
+});
+</script>
+</body>
+</html>

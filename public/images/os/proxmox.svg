@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <rect width="128" height="128" rx="26" fill="#141821"/>
+  <rect x="3" y="3" width="122" height="122" rx="23" stroke="#E57000" stroke-opacity="0.35" stroke-width="2"/>
+  <!-- Top & Bottom Silver-Slate Chevrons -->
+  <path d="M36 26L64 54L92 26H75L64 37L53 26H36Z" fill="#CBD5E1"/>
+  <path d="M36 102L64 74L92 102H75L64 91L53 102H36Z" fill="#CBD5E1"/>
+  <!-- Left & Right Proxmox Orange Chevrons -->
+  <path d="M22 40L50 64L22 88V71L31 64L22 57V40Z" fill="#E57000"/>
+  <path d="M106 40L78 64L106 88V71L97 64L106 57V40Z" fill="#E57000"/>
+</svg>

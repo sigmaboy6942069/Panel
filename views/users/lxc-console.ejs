@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <link rel="icon" href="<%= siteLogo %>" type="image/png">
+  <link rel="stylesheet" href="/css/admin.css">
+  <link rel="stylesheet" href="/vendor/xterm/xterm.css">
+  <script src="/vendor/xterm/xterm.js"></script>
+  <script src="/vendor/xterm/addon-fit.js"></script>
+  <style>
+    body { margin: 0; background: #06060b; color: #e5e7eb; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .pty-bar {
+      height: 52px; padding: 0 16px; background: #0d0d16; border-bottom: 1px solid rgba(99,102,241,0.25);
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    #xtermMount { flex: 1; padding: 8px; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div class="pty-bar">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <a href="/lxc/<%= instance.refId %>" class="btn btn-outline" style="padding:6px 12px;">&larr; Back to <%= instance.name %></a>
+      <strong style="font-size:14px;">LXC PTY Terminal: <%= instance.name %></strong>
+      <span id="wsStateBadge" style="font-size:12px;color:#f59e0b;">Connecting...</span>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-outline" onclick="reconnectPty()">Reconnect</button>
+    </div>
+  </div>
+  <div id="xtermMount"></div>
+
+  <script>
+    let term, fitAddon, ws;
+
+    function initPty() {
+      const mount = document.getElementById('xtermMount');
+      mount.innerHTML = '';
+      term = new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        theme: { background: '#06060b', foreground: '#f3f4f6' }
+      });
+      fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(mount);
+      fitAddon.fit();
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${location.host}/ws/lxc/<%= instance.refId %>/console?cols=${term.cols}&rows=${term.rows}`);
+      const badge = document.getElementById('wsStateBadge');
+
+      ws.onopen = () => {
+        badge.textContent = 'Connected (Real PTY)';
+        badge.style.color = '#10b981';
+        term.focus();
+      };
+
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'output') term.write(msg.data);
+          else if (msg.type === 'error') term.writeln('\r\n\x1b[31m[Console Error] ' + msg.message + '\x1b[0m\r\n');
+          else if (msg.type === 'exit') term.writeln('\r\n\x1b[33m[Session Closed]\x1b[0m');
+        } catch {
+          term.write(ev.data);
+        }
+      };
+
+      ws.onclose = () => {
+        badge.textContent = 'Disconnected';
+        badge.style.color = '#ef4444';
+      };
+
+      term.onData((data) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data }));
+        }
+      });
+
+      window.addEventListener('resize', () => {
+        if (!fitAddon || !term) return;
+        fitAddon.fit();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        }
+      });
+    }
+
+    function reconnectPty() {
+      if (ws) try { ws.close(); } catch {}
+      initPty();
+    }
+
+    document.addEventListener('DOMContentLoaded', initPty);
+  </script>
+</body>
+</html>
