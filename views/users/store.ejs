@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0f">
+  <title><%= title || 'Server Store - TGVPANEL' %></title>
+  <link rel="icon" href="<%= siteLogo %>" type="image/png">
+  <link rel="stylesheet" href="/css/admin.css">
+  <style>
+    .store-hero {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 14px;
+      padding: 22px;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    .store-hero h1 { margin: 0 0 6px 0; font-size: 23px; color: var(--text-primary); }
+    .store-hero p { margin: 0; color: var(--text-muted); font-size: 13px; max-width: 720px; }
+    .wallet-chip {
+      display: flex; align-items: center; gap: 10px;
+      background: rgba(16,185,129,0.10); border: 1px solid rgba(16,185,129,0.28);
+      border-radius: 12px; padding: 12px 16px; color: #10B981; font-weight: 700;
+    }
+    .wallet-chip .amount { font-size: 20px; line-height: 1; }
+    .wallet-chip .label { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; opacity: .8; }
+
+    .cpu-group { margin-bottom: 26px; }
+    .cpu-group-head {
+      display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px;
+      padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle);
+    }
+    .cpu-group-head h2 { margin: 0; font-size: 16px; color: var(--text-primary); }
+    .cpu-group-head span { font-size: 12px; color: var(--text-muted); }
+
+    .plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+    .plan-card {
+      position: relative; background: var(--bg-card); border: 1px solid var(--border-card);
+      border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px;
+      transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+    }
+    .plan-card:hover { transform: translateY(-3px); border-color: rgba(99,102,241,.45); box-shadow: 0 14px 34px rgba(0,0,0,.32); }
+    .plan-card.unavailable { opacity: .58; }
+    .plan-badge {
+      position: absolute; top: -9px; right: 14px; background: linear-gradient(135deg,#6366F1,#8B5CF6);
+      color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 999px;
+    }
+    .plan-badge.stock { background: rgba(245,158,11,.9); }
+    .plan-name { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 0; }
+    .plan-cpu { font-size: 11px; color: #818cf8; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; }
+    .plan-specs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin: 2px 0; }
+    .plan-spec { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-secondary); }
+    .plan-spec strong { color: var(--text-primary); font-weight: 700; }
+    .plan-spec svg { width: 13px; height: 13px; color: var(--text-muted); flex-shrink: 0; }
+    .plan-price { border-top: 1px solid var(--border-subtle); padding-top: 12px; margin-top: auto; }
+    .plan-price .now { font-size: 24px; font-weight: 800; color: var(--text-primary); line-height: 1; }
+    .plan-price .per { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
+    .plan-price .was { font-size: 12px; color: var(--text-muted); text-decoration: line-through; margin-left: 6px; }
+    .plan-price .renew { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    .plan-actions { display: flex; gap: 8px; }
+
+    .store-empty {
+      background: var(--bg-card); border: 1px dashed var(--border-card); border-radius: 14px;
+      padding: 44px 22px; text-align: center; color: var(--text-muted);
+    }
+    .store-empty h2 { color: var(--text-primary); margin: 0 0 8px 0; font-size: 18px; }
+
+    /* ---- checkout modal ---- */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.76); backdrop-filter: blur(6px);
+      z-index: 2000; display: none; align-items: flex-start; justify-content: center; padding: 28px 16px; overflow-y: auto;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-card {
+      background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 14px;
+      width: 100%; max-width: 620px; box-shadow: 0 24px 70px rgba(0,0,0,.6); overflow: hidden;
+    }
+    .modal-head {
+      padding: 16px 20px; border-bottom: 1px solid var(--border-subtle);
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    }
+    .modal-head h2 { margin: 0; font-size: 16px; color: var(--text-primary); }
+    .modal-head .close { background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; line-height: 1; }
+    .modal-body { padding: 18px 20px; }
+    .modal-foot { padding: 14px 20px; border-top: 1px solid var(--border-subtle); display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+    .f-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .f { display: flex; flex-direction: column; gap: 5px; }
+    .f.full { grid-column: 1 / -1; }
+    .f label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+    .f input, .f select {
+      padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border-color);
+      background: rgba(255,255,255,.03); color: var(--text-primary); font-size: 13px;
+    }
+    .f input:focus, .f select:focus { outline: none; border-color: #6366F1; box-shadow: 0 0 0 3px rgba(99,102,241,.12); }
+    .f .hint { font-size: 11px; color: var(--text-muted); }
+    .checkbox-row { display: flex; gap: 9px; align-items: flex-start; font-size: 12px; color: var(--text-secondary); }
+    .checkbox-row input { margin-top: 2px; }
+    .summary {
+      background: rgba(99,102,241,.07); border: 1px solid rgba(99,102,241,.22);
+      border-radius: 10px; padding: 12px 14px; margin-top: 14px; font-size: 13px;
+    }
+    .summary .row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; color: var(--text-secondary); }
+    .summary .row.total { border-top: 1px solid rgba(99,102,241,.25); margin-top: 6px; padding-top: 8px; font-weight: 800; color: var(--text-primary); font-size: 15px; }
+    .summary .warn { color: #F59E0B; font-size: 12px; margin-top: 6px; }
+    .btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn:hover { color: var(--text-primary); border-color: #6366F1; }
+    .btn-primary { background: linear-gradient(135deg,#6366F1,#8B5CF6); border: none; color: #fff; }
+    .btn-primary:hover { color: #fff; filter: brightness(1.08); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .result-box { font-family: 'SF Mono', ui-monospace, monospace; font-size: 12px; background: rgba(0,0,0,.3); border-radius: 9px; padding: 12px; color: var(--text-primary); white-space: pre-wrap; word-break: break-all; }
+    .alert { border-radius: 10px; padding: 11px 14px; font-size: 13px; margin-bottom: 12px; }
+    .alert-error { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.32); color: #F87171; }
+    .alert-info { background: rgba(6,182,212,.10); border: 1px solid rgba(6,182,212,.28); color: #22D3EE; }
+    .alert-success { background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.32); color: #34D399; }
+    .toast-wrap { position: fixed; right: 18px; bottom: 18px; z-index: 3000; display: flex; flex-direction: column; gap: 8px; }
+    .toast { background: var(--bg-card); border: 1px solid var(--border-card); border-left: 3px solid #6366F1; border-radius: 10px; padding: 11px 15px; font-size: 13px; color: var(--text-primary); box-shadow: 0 12px 30px rgba(0,0,0,.45); max-width: 380px; }
+    .toast.error { border-left-color: #EF4444; }
+    .toast.success { border-left-color: #10B981; }
+    @media (max-width: 720px) { .f-grid { grid-template-columns: 1fr; } .plan-specs { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="s-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/>
+      <line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/>
+      <line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/>
+      <line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/>
+      <line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>
+    </symbol>
+    <symbol id="s-mem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="7" width="20" height="10" rx="1"/><line x1="6" y1="11" x2="6" y2="13"/>
+      <line x1="10" y1="11" x2="10" y2="13"/><line x1="14" y1="11" x2="14" y2="13"/><line x1="18" y1="11" x2="18" y2="13"/>
+    </symbol>
+    <symbol id="s-disk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+    </symbol>
+    <symbol id="s-net" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+      <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+    </symbol>
+    <symbol id="s-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+    </symbol>
+    <symbol id="s-cart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+      <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+    </symbol>
+    <symbol id="s-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="admin-wrapper">
+  <%- include('../partials/users/sidebar') %>
+
+  <div class="admin-main">
+    <%- include('../partials/admin/header') %>
+
+    <div class="admin-content">
+
+      <div class="store-hero">
+        <div>
+          <h1>Server Store</h1>
+          <p>
+            Order a KVM server and it is provisioned onto your account straight away.
+            Servers run on dedicated AMD EPYC, AMD Ryzen and Intel Xeon hosts in
+            Düsseldorf, Germany, and are billed from your panel credit.
+          </p>
+        </div>
+        <div class="wallet-chip" title="Credit available in your panel account">
+          <div>
+            <div class="label">Panel credit</div>
+            <div class="amount" id="walletBalance"><%= (balanceCents / 100).toFixed(2) %> €</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="storeAlerts"></div>
+
+      <% if (!catalogue.enabled) { %>
+        <div class="store-empty">
+          <h2>The store is not open right now</h2>
+          <p>Server ordering is currently disabled. Please contact support if you would like to place an order.</p>
+        </div>
+      <% } else if (!catalogue.groups.length) { %>
+        <div class="store-empty">
+          <h2>No plans published yet</h2>
+          <p>The catalogue is still being prepared. Please check back shortly.</p>
+        </div>
+      <% } else { %>
+        <% catalogue.groups.forEach(function(group) { %>
+          <div class="cpu-group">
+            <div class="cpu-group-head">
+              <h2><%= group.label %></h2>
+              <span><%= group.plans.length %> plan<%= group.plans.length === 1 ? '' : 's' %> · Düsseldorf, DE</span>
+            </div>
+            <div class="plan-grid">
+              <% group.plans.forEach(function(plan) { %>
+                <div class="plan-card <%= plan.available ? '' : 'unavailable' %>">
+                  <% if (plan.popular) { %><div class="plan-badge">Popular</div><% } %>
+                  <% if (!plan.available) { %><div class="plan-badge stock">Out of stock</div><% } %>
+                  <div>
+                    <div class="plan-cpu"><%= plan.cpuLabel %></div>
+                    <h3 class="plan-name"><%= plan.displayName %></h3>
+                  </div>
+
+                  <div class="plan-specs">
+                    <div class="plan-spec"><svg><use href="#s-cpu"/></svg><strong><%= plan.cores %></strong> vCPU</div>
+                    <div class="plan-spec"><svg><use href="#s-mem"/></svg><strong><%= plan.memoryGb %></strong> GB RAM</div>
+                    <div class="plan-spec"><svg><use href="#s-disk"/></svg><strong><%= plan.diskGb %></strong> GB storage</div>
+                    <div class="plan-spec"><svg><use href="#s-net"/></svg><strong><%= plan.connectionGbit %></strong> Gbit/s</div>
+                    <div class="plan-spec"><svg><use href="#s-globe"/></svg><strong><%= plan.ipv4 %></strong> IPv4</div>
+                    <div class="plan-spec"><svg><use href="#s-globe"/></svg><strong><%= plan.ipv6 %></strong> IPv6</div>
+                  </div>
+
+                  <% if (plan.description) { %>
+                    <div style="font-size:12px;color:var(--text-muted);"><%= plan.description %></div>
+                  <% } %>
+
+                  <div class="plan-price">
+                    <div>
+                      <span class="now" data-cents="<%= plan.retailCents %>"></span>
+                      <span class="per">/ <%= plan.durationMonths %> month<%= plan.durationMonths === 1 ? '' : 's' %></span>
+                      <% if (plan.discountPercent > 0) { %>
+                        <span class="was"><%= plan.discountPercent %>% off</span>
+                      <% } %>
+                    </div>
+                    <div class="renew">Renews at <span data-cents="<%= plan.retailRenewCents %>"></span>
+                      <% if (plan.setupCents > 0) { %> · one-off setup <span data-cents="<%= plan.setupCents %>"></span><% } %>
+                    </div>
+                  </div>
+
+                  <div class="plan-actions">
+                    <button class="btn btn-primary" style="flex:1"
+                      data-order='{"id":<%= plan.id %>,"name":"<%= plan.displayName.replace(/"/g,'&quot;') %>","cents":<%= plan.retailCents %>,"setup":<%= plan.setupCents %>,"duration":<%= plan.durationMonths %>,"disk":<%= plan.diskGb %>,"available":<%= plan.available %>}'
+                      <%= plan.available ? '' : 'disabled' %>>
+                      Order now
+                    </button>
+                  </div>
+                </div>
+              <% }); %>
+            </div>
+          </div>
+        <% }); %>
+      <% } %>
+
+    </div>
+
+    <%- include('../partials/admin/footer') %>
+  </div>
+</div>
+
+<!-- ============================ CHECKOUT MODAL ============================ -->
+<div class="modal-overlay" id="checkoutModal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="checkoutTitle">Order server</h2>
+      <button class="close" onclick="closeCheckout()" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body" id="checkoutBody">
+      <div id="checkoutError"></div>
+
+      <div class="f-grid">
+        <div class="f full">
+          <label for="osSelect">Operating system</label>
+          <select id="osSelect">
+            <% catalogue.osImages.forEach(function(img) { %>
+              <option value="<%= img.id %>" data-windows="<%= img.windows ? 1 : 0 %>" data-mindisk="<%= img.minDiskGb || 0 %>">
+                <%= img.name %><%= img.windows && img.minDiskGb ? ' (min ' + img.minDiskGb + ' GB disk)' : '' %>
+              </option>
+            <% }); %>
+          </select>
+          <% if (!catalogue.osImages.length) { %>
+            <div class="hint">No operating systems are available yet. Please contact support.</div>
+          <% } %>
+        </div>
+
+        <div class="f">
+          <label for="serverName">Server name</label>
+          <input id="serverName" type="text" maxlength="50" placeholder="web-01">
+          <div class="hint">Letters, digits, spaces and ._,:;!?()#&amp;+@/- (max 50).</div>
+        </div>
+
+        <div class="f">
+          <label for="serverHostname">Hostname <span style="text-transform:none;font-weight:500">(optional)</span></label>
+          <input id="serverHostname" type="text" maxlength="63" placeholder="web-01.example.com">
+        </div>
+
+        <div class="f full">
+          <label for="rootPassword">Root password <span style="text-transform:none;font-weight:500">(optional)</span></label>
+          <input id="rootPassword" type="text" maxlength="64" placeholder="Leave empty to generate a strong one">
+          <div class="hint">8–64 characters: letters, digits and !#$%&amp;()*+,-./:;=?@^_{|}~</div>
+        </div>
+
+        <div class="f">
+          <label for="voucherCode">Voucher <span style="text-transform:none;font-weight:500">(optional)</span></label>
+          <input id="voucherCode" type="text" maxlength="64" placeholder="Promo code">
+          <div class="hint">Applies to the first payment only.</div>
+        </div>
+
+        <div class="f">
+          <label>&nbsp;</label>
+          <div class="checkbox-row" style="padding-top:9px">
+            <input type="checkbox" id="autoRenew" <%= catalogue.autoRenewDefault ? 'checked' : '' %>>
+            <span>Auto-renew from my panel credit</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary" id="summaryBox">
+        <div class="row"><span>Plan</span><strong id="sumPlan">—</strong></div>
+        <div class="row"><span>Price</span><span id="sumPrice">—</span></div>
+        <div class="row"><span>One-off setup</span><span id="sumSetup">—</span></div>
+        <div class="row total"><span>Due today</span><span id="sumTotal">—</span></div>
+        <div class="row"><span>Your credit after this order</span><span id="sumAfter">—</span></div>
+        <div class="warn" id="sumWarn" style="display:none"></div>
+      </div>
+
+      <div style="margin-top:14px;display:flex;flex-direction:column;gap:9px">
+        <div class="checkbox-row">
+          <input type="checkbox" id="tosAccept">
+          <span><%= catalogue.tosText ? catalogue.tosText : 'I accept the terms of service and the privacy policy.' %></span>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="cancelAccept">
+          <span>I want the server provisioned immediately and understand that I waive my right of withdrawal once provisioning has started.</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot" id="checkoutFoot">
+      <button class="btn" onclick="closeCheckout()">Cancel</button>
+      <button class="btn" id="previewBtn" onclick="runPreview()">Check price</button>
+      <button class="btn btn-primary" id="orderBtn" onclick="submitOrder()" disabled>
+        <svg style="width:13px;height:13px;vertical-align:-2px;margin-right:5px"><use href="#s-bolt"/></svg>
+        Order &amp; provision
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ RESULT MODAL ============================ -->
+<div class="modal-overlay" id="resultModal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="resultTitle">Order placed</h2>
+      <button class="close" onclick="closeResult()" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body" id="resultBody"></div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeResult()">Close</button>
+      <a class="btn btn-primary" href="/cloud">Go to my servers</a>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Storefront logic. Money arrives from the API as integer cents and is only
+// ever formatted for display — never recomputed in the browser.
+// ---------------------------------------------------------------------------
+const CATALOGUE = <%- JSON.stringify({ osImages: catalogue.osImages, enabled: catalogue.enabled }) %>;
+let walletCents = <%- JSON.stringify(balanceCents) %>;
+let selectedPlan = null;
+let previewedTotal = null;
+
+function money(cents) {
+  if (cents === null || cents === undefined || isNaN(cents)) return '—';
+  const n = Math.round(Number(cents));
+  const sign = n < 0 ? '-' : '';
+  const abs = Math.abs(n);
+  return sign + (abs / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' €';
+}
+
+async function api(url, options) {
+  const opts = Object.assign({ method: 'GET', cache: 'no-store', headers: {} }, options || {});
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  if (meta && meta.content) opts.headers['X-CSRF-Token'] = meta.content;
+  if (opts.body && typeof opts.body === 'object') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(opts.body);
+  }
+  const res = await fetch(url, opts);
+  let data = {};
+  try { data = await res.json(); } catch (_e) { data = {}; }
+  if (!res.ok) {
+    const err = new Error(data.error || ('Request failed (HTTP ' + res.status + ')'));
+    err.code = data.code;
+    err.details = data;
+    throw err;
+  }
+  return data;
+}
+
+function toast(msg, type) {
+  const wrap = document.getElementById('toastWrap');
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || '');
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 5200);
+}
+
+function paintMoney() {
+  document.querySelectorAll('[data-cents]').forEach(function (el) {
+    el.textContent = money(el.getAttribute('data-cents'));
+  });
+}
+
+async function loadWallet() {
+  try {
+    const data = await api('/api/v1/reseller/wallet');
+    walletCents = data.balanceCents;
+    document.getElementById('walletBalance').textContent = money(walletCents);
+  } catch (err) {
+    document.getElementById('walletBalance').textContent = 'unavailable';
+  }
+}
+
+function storeAlert(html, kind) {
+  document.getElementById('storeAlerts').innerHTML =
+    '<div class="alert alert-' + (kind || 'info') + '">' + html + '</div>';
+}
+
+// ------------------------------- checkout ---------------------------------
+
+function openCheckout(btn) {
+  let plan;
+  try { plan = JSON.parse(btn.getAttribute('data-order')); } catch (_e) { return; }
+  selectedPlan = plan;
+  previewedTotal = null;
+
+  document.getElementById('checkoutTitle').textContent = 'Order — ' + plan.name;
+  document.getElementById('checkoutError').innerHTML = '';
+  document.getElementById('sumPlan').textContent = plan.name;
+  document.getElementById('sumPrice').textContent = money(plan.cents);
+  document.getElementById('sumSetup').textContent = plan.setup ? money(plan.setup) : money(0);
+  document.getElementById('sumTotal').textContent = money(plan.cents + (plan.setup || 0));
+  document.getElementById('sumAfter').textContent =
+    walletCents === null ? '—' : money(walletCents - plan.cents - (plan.setup || 0));
+  document.getElementById('sumWarn').style.display = 'none';
+
+  if (walletCents !== null && walletCents < plan.cents + (plan.setup || 0)) {
+    const warn = document.getElementById('sumWarn');
+    warn.style.display = 'block';
+    warn.textContent = 'Not enough panel credit for this order. Please contact support to top up your credit.';
+  }
+
+  document.getElementById('tosAccept').checked = false;
+  document.getElementById('cancelAccept').checked = false;
+  document.getElementById('orderBtn').disabled = true;
+  document.getElementById('previewBtn').disabled = !CATALOGUE.osImages.length;
+  document.getElementById('checkoutBody').style.display = '';
+  document.getElementById('checkoutFoot').style.display = '';
+  document.getElementById('checkoutModal').classList.add('open');
+
+  if (!CATALOGUE.osImages.length) {
+    storeAlert('No operating systems are published yet — ordering is not possible. Please contact support.', 'error');
+  }
+}
+
+function closeCheckout() {
+  document.getElementById('checkoutModal').classList.remove('open');
+}
+
+function collectPayload() {
+  const osSelect = document.getElementById('osSelect');
+  const osOption = osSelect.options[osSelect.selectedIndex];
+  return {
+    planId: selectedPlan.id,
+    os: osSelect.value,
+    name: document.getElementById('serverName').value.trim() || null,
+    hostname: document.getElementById('serverHostname').value.trim() || null,
+    password: document.getElementById('rootPassword').value.trim() || null,
+    voucher: document.getElementById('voucherCode').value.trim() || null,
+    autoRenew: document.getElementById('autoRenew').checked,
+    windows: osOption ? osOption.getAttribute('data-windows') === '1' : false,
+    minDisk: osOption ? parseInt(osOption.getAttribute('data-mindisk') || '0', 10) : 0,
+  };
+}
+
+function showCheckoutError(message) {
+  document.getElementById('checkoutError').innerHTML =
+    '<div class="alert alert-error">' + String(message).replace(/</g, '&lt;') + '</div>';
+}
+
+async function runPreview() {
+  if (!selectedPlan) return;
+  const payload = collectPayload();
+  if (!payload.os) { showCheckoutError('Please choose an operating system.'); return; }
+  if (payload.windows && payload.minDisk && selectedPlan.disk < payload.minDisk) {
+    showCheckoutError('Windows needs at least ' + payload.minDisk + ' GB of storage; this plan has ' + selectedPlan.disk + ' GB.');
+    return;
+  }
+  document.getElementById('checkoutError').innerHTML = '';
+  const btn = document.getElementById('previewBtn');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  try {
+    const data = await api('/api/v1/reseller/store/preview', { method: 'POST', body: payload });
+    const total = data.totalCents;
+    previewedTotal = total;
+    document.getElementById('sumPrice').textContent = money(data.retailCents);
+    document.getElementById('sumSetup').textContent = money(data.setupCents);
+    document.getElementById('sumTotal').textContent = money(total);
+    document.getElementById('sumAfter').textContent = money(data.walletBalanceCents - total);
+    walletCents = data.walletBalanceCents;
+    document.getElementById('walletBalance').textContent = money(walletCents);
+
+    const warn = document.getElementById('sumWarn');
+    if (data.walletBalanceCents < total) {
+      warn.style.display = 'block';
+      warn.textContent = 'You need ' + money(total) + ' but only have ' + money(data.walletBalanceCents) + '. Contact support to top up.';
+      document.getElementById('orderBtn').disabled = true;
+    } else {
+      warn.style.display = 'none';
+      document.getElementById('orderBtn').disabled = false;
+    }
+    if (data.upstreamBalance) {
+      document.getElementById('sumAfter').title =
+        'Provider balance after this order: ' + money(data.upstreamBalance.afterOrderCents);
+    }
+    toast('Price confirmed: ' + money(total), 'success');
+  } catch (err) {
+    previewedTotal = null;
+    document.getElementById('orderBtn').disabled = true;
+    const extra = err.details && err.details.fields
+      ? '<br>' + Object.keys(err.details.fields).map(function (k) { return k + ': ' + err.details.fields[k]; }).join('<br>')
+      : '';
+    showCheckoutError(err.message + extra);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check price';
+  }
+}
+
+async function submitOrder() {
+  if (!selectedPlan) return;
+  const payload = collectPayload();
+  if (!document.getElementById('tosAccept').checked || !document.getElementById('cancelAccept').checked) {
+    showCheckoutError('Please accept both the terms and the immediate-provisioning waiver.');
+    return;
+  }
+  const btn = document.getElementById('orderBtn');
+  btn.disabled = true;
+  btn.textContent = 'Provisioning…';
+  document.getElementById('checkoutError').innerHTML = '';
+
+  try {
+    const data = await api('/api/v1/reseller/store/order', {
+      method: 'POST',
+      body: {
+        planId: payload.planId,
+        os: payload.os,
+        name: payload.name,
+        hostname: payload.hostname,
+        password: payload.password,
+        voucher: payload.voucher,
+        autoRenew: payload.autoRenew,
+        tos: true,
+        cancellation: true,
+      },
+    });
+    const order = data.order || {};
+    walletCents = order.walletBalanceCents;
+    document.getElementById('walletBalance').textContent = money(walletCents);
+    closeCheckout();
+    showResult(order);
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Order & provision';
+    const extra = err.details && err.details.fields
+      ? '<br>' + Object.keys(err.details.fields).map(function (k) { return k + ': ' + err.details.fields[k]; }).join('<br>')
+      : '';
+    showCheckoutError(err.message + extra);
+  }
+}
+
+function showResult(order) {
+  const creds = order.credentials;
+  const ip = order.primaryIpv4;
+  const building = !ip;
+  let html = '';
+  html += '<div class="alert alert-success">Order <strong>' + order.orderRef + '</strong> is confirmed.</div>';
+  if (building) {
+    html += '<div class="alert alert-info">Your server is being built right now. IP addresses and the final status appear on the server page within a few minutes — you will also get a notification.</div>';
+  }
+  html += '<div class="summary" style="margin-top:0">';
+  html += '<div class="row"><span>Server</span><strong>' + escapeHtml(order.upstreamProductId || '—') + '</strong></div>';
+  html += '<div class="row"><span>Charged</span><strong>' + money(order.chargedCents) + '</strong></div>';
+  html += '<div class="row"><span>Credit left</span><strong>' + money(order.walletBalanceCents) + '</strong></div>';
+  if (ip) html += '<div class="row"><span>IPv4</span><strong>' + escapeHtml(ip) + '</strong></div>';
+  if (order.primaryIpv6) html += '<div class="row"><span>IPv6</span><strong>' + escapeHtml(order.primaryIpv6) + '</strong></div>';
+  html += '</div>';
+  if (creds && creds.password) {
+    html += '<div style="margin-top:12px"><label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted)">Login credentials</label>';
+    html += '<div class="result-box">' + escapeHtml(creds.username) + ' / ' + escapeHtml(creds.password) + '</div>';
+    html += '<div class="hint" style="font-size:11px;color:var(--text-muted);margin-top:6px">Store this now — you can also reveal it later on the server page.</div></div>';
+  }
+  document.getElementById('resultBody').innerHTML = html;
+  document.getElementById('resultTitle').textContent = building ? 'Order placed — building your server' : 'Your server is ready';
+  document.getElementById('resultModal').classList.add('open');
+}
+
+function closeResult() {
+  document.getElementById('resultModal').classList.remove('open');
+}
+
+function escapeHtml(v) {
+  return String(v === null || v === undefined ? '' : v).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+document.querySelectorAll('[data-order]').forEach(function (btn) {
+  btn.addEventListener('click', function () { openCheckout(btn); });
+});
+document.querySelectorAll('.modal-overlay').forEach(function (ov) {
+  ov.addEventListener('click', function (e) { if (e.target === ov) ov.classList.remove('open'); });
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(function (o) { o.classList.remove('open'); });
+});
+
+paintMoney();
+loadWallet();
+</script>
+</body>
+</html>

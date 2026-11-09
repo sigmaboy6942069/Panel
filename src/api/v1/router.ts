@@ -21,6 +21,7 @@ import {
   requireRole,
 } from '../../security/middleware';
 import { importHvmDatabase } from '../../db/hvm-importer';
+import { createResellerApiRouter } from './reseller-routes';
 import { LifecycleAction, VirtualizationEngine } from '../../services/virtualization/VirtualizationAdapter';
 
 const templateUploadDir = path.resolve(process.cwd(), 'data', 'lxc-templates');
@@ -1847,6 +1848,9 @@ export function createApiV1Router(ctx: HkvmRuntimeContext): Router {
       }
     }
   );
+
+  // --- Upstream reseller integration (Bukkit-Hosting KVM provisioning) ---
+  router.use('/reseller', createResellerApiRouter(ctx.reseller));
 
   return router;
 }

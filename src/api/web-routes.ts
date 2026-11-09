@@ -559,5 +559,129 @@ export function createUnifiedWebRouter(
     }
   });
 
+  // ===========================================================================
+  // Upstream Reseller (Bukkit-Hosting) — storefront, customer cloud, admin
+  // ===========================================================================
+
+  /**
+   * Customer storefront: browse enabled plans grouped by CPU family, pick an
+   * OS and order. The actual purchase happens client-side against
+   * POST /api/v1/reseller/store/order so the buyer sees live pricing first.
+   */
+  router.get('/store', requirePrincipal, async (req: Request, res: Response) => {
+    try {
+      const sess: any = (req as any).session;
+      const principal = (req as any).principal;
+      const [catalogue, balanceCents] = await Promise.all([
+        ctx.reseller.getStoreCatalogue(),
+        principal
+          ? ctx.reseller.getWalletBalance(principal.userId).catch(() => 0)
+          : Promise.resolve(0),
+      ]);
+      return res.render('users/store', {
+        title: 'Server Store - TGVPANEL',
+        currentPage: 'store',
+        user: res.locals.user || sess?.user || { username: sess?.username, role: sess?.role },
+        catalogue,
+        balanceCents,
+        resellerReady: catalogue.enabled && catalogue.groups.length > 0,
+      });
+    } catch (err: any) {
+      return res.status(500).render('users/404', {
+        message: err?.message || 'Store unavailable',
+      });
+    }
+  });
+
+  /** Customer's upstream (cloud) servers. */
+  router.get('/cloud', requirePrincipal, async (req: Request, res: Response) => {
+    const sess: any = (req as any).session;
+    const principal = (req as any).principal;
+    const servers = principal
+      ? await ctx.reseller.listCloudServers({ userId: principal.userId })
+      : [];
+    const balanceCents = principal ? await ctx.reseller.getWalletBalance(principal.userId) : 0;
+    return res.render('users/cloud', {
+      title: 'My Cloud Servers - TGVPANEL',
+      currentPage: 'cloud',
+      user: res.locals.user || sess?.user || { username: sess?.username, role: sess?.role },
+      servers: servers.map((s) => ctx.reseller.serializeServer(s)),
+      balanceCents,
+    });
+  });
+
+  /** Single upstream server: power, console, credentials, network, renewal. */
+  router.get('/cloud/:id', requirePrincipal, async (req: Request, res: Response) => {
+    const sess: any = (req as any).session;
+    const principal = (req as any).principal;
+    const id = parseInt(String(req.params.id), 10);
+    try {
+      if (!Number.isFinite(id) || id <= 0) throw Object.assign(new Error('Not found'), { statusCode: 404 });
+      const server = await ctx.reseller.getAuthorizedCloudServer(principal, id);
+      const osImages = await ctx.reseller.listOsImages({ enabledOnly: true });
+      const balanceCents = await ctx.reseller.getWalletBalance(server.user_id);
+      const isOwner = principal?.userId === server.user_id;
+      return res.render('users/cloud-detail', {
+        title: `${server.name} - TGVPANEL`,
+        currentPage: 'cloud',
+        user: res.locals.user || sess?.user || { username: sess?.username, role: sess?.role },
+        // The stored root password is embedded in the page only for the owner;
+        // staff get the management UI but must reveal credentials explicitly.
+        server: ctx.reseller.serializeServer(server, { includeCredentials: isOwner }),
+        osImages,
+        balanceCents,
+        isOwner,
+      });
+    } catch (err: any) {
+      return res.status(err.statusCode || 404).render('users/404', {
+        message: err.message || 'Cloud server unavailable',
+      });
+    }
+  });
+
+  /**
+   * Admin reseller console: provider config, catalogue + pricing, order queue,
+   * fleet, customer wallets and the raw upstream API log.
+   */
+  router.get('/admin/reseller', ...adminStaffGuard, async (req: Request, res: Response) => {
+    const sess: any = (req as any).session;
+    const status = await ctx.reseller
+      .getStatus({ probeUpstream: req.query.probe !== '0' })
+      .catch(() => null);
+    const plans = await ctx.reseller.listPlans({ enabledOnly: false }).catch(() => []);
+    const osImages = await ctx.reseller.listOsImages({ enabledOnly: false }).catch(() => []);
+    const orders = await ctx.reseller.listOrders({ limit: 50 }).catch(() => ({ orders: [], total: 0 }));
+    const servers = await ctx.reseller.listCloudServers({ limit: 200 }).catch(() => []);
+    const users = await ctx.db
+      .all<{ id: number; username: string; email: string | null; role: string }>(
+        `SELECT id, username, email, role FROM users WHERE is_active = 1 ORDER BY username`
+      )
+      .catch(() => [] as Array<{ id: number; username: string; email: string | null; role: string }>);
+    const wallets = await ctx.db
+      .all<{ user_id: number; balance_cents: number }>(
+        `SELECT user_id, COALESCE(SUM(delta_cents), 0) AS balance_cents
+         FROM reseller_wallet_ledger GROUP BY user_id`
+      )
+      .catch(() => [] as Array<{ user_id: number; balance_cents: number }>);
+
+    return res.render('admin/reseller', {
+      title: 'Reseller & Upstream Provisioning - TGVPANEL',
+      currentPage: 'reseller',
+      cp: 'reseller',
+      section: 'reseller',
+      pageName: 'reseller',
+      pageTitle: 'Reseller & Upstream Provisioning - TGVPANEL',
+      user: res.locals.user || sess?.user || { username: sess?.username, role: sess?.role },
+      status,
+      plans,
+      osImages,
+      orders: orders.orders,
+      ordersTotal: orders.total,
+      servers: servers.map((s) => ctx.reseller.serializeServer(s)),
+      users,
+      wallets,
+    });
+  });
+
   return router;
 }

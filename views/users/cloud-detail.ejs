@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0f">
+  <title><%= title || 'Cloud Server - TGVPANEL' %></title>
+  <link rel="icon" href="<%= siteLogo %>" type="image/png">
+  <link rel="stylesheet" href="/css/admin.css">
+  <style>
+    .dt-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle); }
+    .dt-head h1 { margin: 0 0 6px 0; font-size: 22px; color: var(--text-primary); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .dt-head .sub { font-size: 12px; color: var(--text-muted); font-family: 'SF Mono', ui-monospace, monospace; }
+    .dt-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+    .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .pill.running { background: rgba(16,185,129,.15); color: #10B981; }
+    .pill.stopped { background: rgba(107,114,128,.2); color: #9CA3AF; }
+    .pill.building { background: rgba(245,158,11,.17); color: #F59E0B; }
+    .pill.problem, .pill.suspended { background: rgba(239,68,68,.15); color: #F87171; }
+
+    .dt-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 1080px) { .dt-grid { grid-template-columns: 1fr; } }
+
+    .card { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 13px; padding: 17px; margin-bottom: 16px; }
+    .card h3 { margin: 0 0 13px 0; font-size: 14px; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 13px; }
+    .kv dt { color: var(--text-muted); }
+    .kv dd { margin: 0; color: var(--text-primary); font-weight: 600; word-break: break-word; }
+    .kv dd.mono { font-family: 'SF Mono', ui-monospace, monospace; font-weight: 500; }
+
+    .btn { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+    .btn:hover { color: var(--text-primary); border-color: #6366F1; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-primary { background: linear-gradient(135deg,#6366F1,#8B5CF6); border: none; color: #fff; }
+    .btn-primary:hover { color: #fff; filter: brightness(1.08); }
+    .btn-danger { border-color: rgba(239,68,68,.4); color: #F87171; }
+    .btn-danger:hover { background: rgba(239,68,68,.12); border-color: #EF4444; color: #FCA5A5; }
+    .btn svg { width: 13px; height: 13px; }
+
+    .cred-box { font-family: 'SF Mono', ui-monospace, monospace; font-size: 12px; background: rgba(0,0,0,.32); border-radius: 9px; padding: 11px 13px; color: var(--text-primary); word-break: break-all; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    .copy-btn { background: none; border: none; color: #818cf8; cursor: pointer; font-size: 11px; font-weight: 700; white-space: nowrap; }
+
+    .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .meter { background: rgba(255,255,255,.03); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 11px 13px; }
+    .meter .label { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); margin-bottom: 6px; }
+    .meter .value { font-size: 18px; font-weight: 800; color: var(--text-primary); line-height: 1; }
+    .meter .bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.07); margin-top: 8px; overflow: hidden; }
+    .meter .bar span { display: block; height: 100%; background: linear-gradient(90deg,#6366F1,#22D3EE); border-radius: 3px; transition: width .4s ease; }
+
+    table.mini { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table.mini th, table.mini td { padding: 7px 9px; text-align: left; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); }
+    table.mini th { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+    table.mini td.mono { font-family: 'SF Mono', ui-monospace, monospace; }
+
+    .f { display: flex; flex-direction: column; gap: 5px; margin-bottom: 11px; }
+    .f label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+    .f input, .f select { padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(255,255,255,.03); color: var(--text-primary); font-size: 13px; }
+    .f .hint { font-size: 11px; color: var(--text-muted); }
+
+    .alert { border-radius: 10px; padding: 11px 14px; font-size: 13px; margin-bottom: 12px; }
+    .alert-error { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.32); color: #F87171; }
+    .alert-info { background: rgba(6,182,212,.10); border: 1px solid rgba(6,182,212,.28); color: #22D3EE; }
+    .alert-success { background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.32); color: #34D399; }
+    .alert-warn { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.32); color: #FBBF24; }
+
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.76); z-index: 2500; display: none; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(5px); }
+    .overlay.open { display: flex; }
+    .overlay-card { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 13px; max-width: 480px; width: 100%; padding: 20px; }
+    .overlay-card h3 { margin: 0 0 9px 0; font-size: 16px; color: var(--text-primary); }
+    .overlay-card p { margin: 0 0 15px 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+    .toast-wrap { position: fixed; right: 18px; bottom: 18px; z-index: 3000; display: flex; flex-direction: column; gap: 8px; }
+    .toast { background: var(--bg-card); border: 1px solid var(--border-card); border-left: 3px solid #6366F1; border-radius: 10px; padding: 11px 15px; font-size: 13px; color: var(--text-primary); box-shadow: 0 12px 30px rgba(0,0,0,.45); max-width: 380px; }
+    .toast.error { border-left-color: #EF4444; }
+    .toast.success { border-left-color: #10B981; }
+    .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch .slider { position: absolute; inset: 0; background: rgba(255,255,255,.12); border-radius: 999px; transition: .2s; cursor: pointer; }
+    .switch .slider:before { content: ''; position: absolute; height: 16px; width: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+    .switch input:checked + .slider { background: #6366F1; }
+    .switch input:checked + .slider:before { transform: translateX(18px); }
+  </style>
+</head>
+<body>
+
+<div class="admin-wrapper">
+  <%- include('../partials/users/sidebar') %>
+
+  <div class="admin-main">
+    <%- include('../partials/admin/header') %>
+
+    <div class="admin-content">
+
+      <div class="dt-head">
+        <div>
+          <h1>
+            <span id="srvName"><%= server.name %></span>
+            <span class="pill" id="srvPill"><span class="dot"></span><span id="srvPillText">…</span></span>
+          </h1>
+          <div class="sub">
+            <a href="/cloud" style="color:#818cf8;text-decoration:none">&larr; My Cloud Servers</a>
+            &nbsp;·&nbsp; #<%= server.id %>
+            &nbsp;·&nbsp; <%= server.upstreamProductId || 'provisioning' %>
+          </div>
+        </div>
+        <div class="dt-actions">
+          <button class="btn" id="btnStart" onclick="power('start')">&#9654; Start</button>
+          <button class="btn btn-danger" id="btnStop" onclick="power('stop')">&#9632; Stop</button>
+          <button class="btn" id="btnRestart" onclick="power('restart')">&#8635; Restart</button>
+          <button class="btn" onclick="openConsole()">Console</button>
+          <button class="btn btn-primary" onclick="refresh()">&#8635; Refresh</button>
+        </div>
+      </div>
+
+      <div id="alerts"></div>
+
+      <div class="dt-grid">
+        <div>
+          <!-- Live utilisation -->
+          <div class="card">
+            <h3>Live utilisation <span style="font-size:11px;color:var(--text-muted);font-weight:500" id="statusTime"></span></h3>
+            <div class="meters" id="meters">
+              <div class="meter"><div class="label">CPU</div><div class="value" id="mCpu">—</div><div class="bar"><span id="bCpu" style="width:0%"></span></div></div>
+              <div class="meter"><div class="label">Memory</div><div class="value" id="mMem">—</div><div class="bar"><span id="bMem" style="width:0%"></span></div></div>
+              <div class="meter"><div class="label">Disk (guest agent)</div><div class="value" id="mDisk">—</div><div class="bar"><span id="bDisk" style="width:0%"></span></div></div>
+              <div class="meter"><div class="label">Uptime</div><div class="value" id="mUptime">—</div></div>
+            </div>
+          </div>
+
+          <!-- Network -->
+          <div class="card">
+            <h3>Network</h3>
+            <div id="networkBox" style="font-size:13px;color:var(--text-muted)">Loading…</div>
+          </div>
+
+          <!-- Firewall -->
+          <div class="card">
+            <h3>Firewall <span style="font-size:11px;color:var(--text-muted);font-weight:500">first matching rule wins</span></h3>
+            <div id="firewallBox" style="font-size:13px;color:var(--text-muted)">Loading…</div>
+          </div>
+
+          <!-- Statistics -->
+          <div class="card">
+            <h3>
+              Usage history
+              <select id="statPeriod" onchange="loadStats()" style="padding:5px 9px;border-radius:7px;border:1px solid var(--border-color);background:rgba(255,255,255,.03);color:var(--text-primary);font-size:12px">
+                <option value="hour">Last hour</option>
+                <option value="day">Last day</option>
+                <option value="week">Last week</option>
+                <option value="month">Last month</option>
+                <option value="year">Last year</option>
+              </select>
+            </h3>
+            <div id="statsBox" style="font-size:13px;color:var(--text-muted)">Loading…</div>
+          </div>
+        </div>
+
+        <div>
+          <!-- Specification -->
+          <div class="card">
+            <h3>Specification</h3>
+            <dl class="kv">
+              <dt>CPU</dt><dd><%= server.cpuLabel || server.cpuFamily || 'KVM' %> · <%= server.cores %> vCPU</dd>
+              <dt>Memory</dt><dd><%= server.memoryGb %> GB</dd>
+              <dt>Storage</dt><dd><%= server.diskGb %> GB</dd>
+              <dt>Connection</dt><dd><%= server.connectionGbit %> Gbit/s</dd>
+              <dt>IPv4</dt><dd><%= server.ipv4Count %> address(es)</dd>
+              <dt>IPv6</dt><dd><%= server.ipv6Count %> network(s)</dd>
+              <dt>OS</dt><dd><%= server.osLabel || '—' %></dd>
+              <dt>Location</dt><dd>Düsseldorf, DE</dd>
+            </dl>
+          </div>
+
+          <!-- Access -->
+          <div class="card">
+            <h3>Access</h3>
+            <div class="f">
+              <label>SSH</label>
+              <div class="cred-box">
+                <span id="sshLine">—</span>
+                <button class="copy-btn" onclick="copyText(document.getElementById('sshLine').textContent)">COPY</button>
+              </div>
+            </div>
+            <div class="f">
+              <label>Password</label>
+              <div class="cred-box">
+                <span id="pwLine">••••••••••••</span>
+                <span style="display:flex;gap:8px">
+                  <button class="copy-btn" onclick="revealAndCopy()">SHOW</button>
+                </span>
+              </div>
+              <div class="hint">Revealing shows the root password stored for this server.</div>
+            </div>
+            <button class="btn" style="width:100%;justify-content:center" onclick="openPasswordModal()">Change root password</button>
+          </div>
+
+          <!-- Billing -->
+          <div class="card">
+            <h3>Billing</h3>
+            <dl class="kv">
+              <dt>Price</dt><dd id="priceNow">—</dd>
+              <dt>Renewal</dt><dd id="renewNow">—</dd>
+              <dt>Cycle</dt><dd><%= server.durationMonths %> month(s)</dd>
+              <dt>Expires</dt><dd id="expiresNow">—</dd>
+              <dt>Auto-renew</dt>
+              <dd>
+                <label class="switch">
+                  <input type="checkbox" id="autoRenewToggle" onchange="toggleAutoRenew()" <%= server.autoRenew ? 'checked' : '' %> <%= isOwner ? '' : 'disabled' %>>
+                  <span class="slider"></span>
+                </label>
+              </dd>
+              <dt>Your credit</dt><dd id="walletNow">—</dd>
+            </dl>
+            <div style="margin-top:13px;display:flex;gap:8px">
+              <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="renewNow()" <%= isOwner ? '' : 'disabled' %>>Renew now</button>
+            </div>
+          </div>
+
+          <!-- Danger zone -->
+          <% if (isOwner) { %>
+          <div class="card" style="border-color:rgba(239,68,68,.28)">
+            <h3 style="color:#F87171">Reinstall</h3>
+            <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px 0">
+              Reinstalls the operating system. <strong style="color:#F87171">All data on the server is destroyed.</strong>
+            </p>
+            <div class="f">
+              <label for="reinstallOs">Operating system</label>
+              <select id="reinstallOs">
+                <% osImages.forEach(function(img) { %>
+                  <option value="<%= img.upstream_os_id %>" <%= img.upstream_os_id === server.osId ? 'selected' : '' %>><%= img.display_name %></option>
+                <% }); %>
+              </select>
+            </div>
+            <button class="btn btn-danger" style="width:100%;justify-content:center" onclick="openReinstallModal()">Reinstall server</button>
+          </div>
+          <% } %>
+        </div>
+      </div>
+
+    </div>
+
+    <%- include('../partials/admin/footer') %>
+  </div>
+</div>
+
+<!-- generic confirm -->
+<div class="overlay" id="confirmOverlay">
+  <div class="overlay-card">
+    <h3 id="confirmTitle">Are you sure?</h3>
+    <p id="confirmText"></p>
+    <div style="display:flex;gap:9px;justify-content:flex-end">
+      <button class="btn" onclick="closeConfirm(false)">Cancel</button>
+      <button class="btn btn-primary" id="confirmOk" onclick="closeConfirm(true)">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- password change -->
+<div class="overlay" id="pwOverlay">
+  <div class="overlay-card">
+    <h3>Change root password</h3>
+    <p>The server must be running and the QEMU guest agent must be installed inside it.</p>
+    <div class="f">
+      <label for="newPw">New password</label>
+      <input id="newPw" type="text" maxlength="64" placeholder="8-64 characters">
+      <div class="hint">Letters, digits and !#$%&amp;()*+,-./:;=?@^_{|}~</div>
+    </div>
+    <div style="display:flex;gap:9px;justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('pwOverlay').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitPassword()">Set password</button>
+    </div>
+  </div>
+</div>
+
+<!-- reinstall -->
+<div class="overlay" id="reinstallOverlay">
+  <div class="overlay-card">
+    <h3 style="color:#F87171">Reinstall operating system</h3>
+    <p>This wipes the server completely and installs a fresh system. Type <strong>REINSTALL</strong> to confirm.</p>
+    <div class="f"><input id="reinstallConfirm" type="text" placeholder="REINSTALL"></div>
+    <div id="reinstallResult"></div>
+    <div style="display:flex;gap:9px;justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('reinstallOverlay').classList.remove('open')">Cancel</button>
+      <button class="btn btn-danger" onclick="submitReinstall()">Reinstall</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+const SERVER_ID = <%= server.id %>;
+let SERVER = <%- JSON.stringify(server) %>;
+let WALLET_CENTS = <%= balanceCents %>;
+let CREDS = SERVER.credentials || null;
+
+function money(cents) {
+  if (cents === null || cents === undefined || isNaN(cents)) return '—';
+  const n = Math.round(Number(cents));
+  return (n < 0 ? '-' : '') + (Math.abs(n) / 100).toFixed(2) + ' €';
+}
+function esc(v) {
+  return String(v === null || v === undefined ? '' : v).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function toast(msg, type) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || '');
+  el.textContent = msg;
+  document.getElementById('toastWrap').appendChild(el);
+  setTimeout(() => el.remove(), 5200);
+}
+async function api(url, options) {
+  const opts = Object.assign({ method: 'GET', cache: 'no-store', headers: {} }, options || {});
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  if (meta && meta.content) opts.headers['X-CSRF-Token'] = meta.content;
+  if (opts.body && typeof opts.body === 'object') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(opts.body);
+  }
+  const res = await fetch(url, opts);
+  let data = {};
+  try { data = await res.json(); } catch (_e) { data = {}; }
+  if (!res.ok) { const e = new Error(data.error || ('Request failed (HTTP ' + res.status + ')')); e.code = data.code; throw e; }
+  return data;
+}
+function alertBox(msg, kind) {
+  document.getElementById('alerts').innerHTML = msg
+    ? '<div class="alert alert-' + (kind || 'info') + '">' + msg + '</div>'
+    : '';
+}
+function confirmBox(title, text, danger) {
+  return new Promise(function (resolve) {
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmText').textContent = text;
+    document.getElementById('confirmOk').className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
+    document.getElementById('confirmOverlay').classList.add('open');
+    window.__cr = resolve;
+  });
+}
+function closeConfirm(v) {
+  document.getElementById('confirmOverlay').classList.remove('open');
+  if (window.__cr) { window.__cr(v); window.__cr = null; }
+}
+function copyText(text) {
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(
+    function () { toast('Copied to clipboard', 'success'); },
+    function () { toast('Could not copy — select the text manually.', 'error'); }
+  );
+}
+function uptimeLabel(sec) {
+  if (!sec && sec !== 0) return '—';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d) return d + 'd ' + h + 'h';
+  if (h) return h + 'h ' + m + 'm';
+  return m + 'm';
+}
+
+function stateOf(s) {
+  if (s.suspended) return { cls: 'suspended', label: 'Suspended' };
+  const st = String(s.state || '').toLowerCase();
+  if (st === 'install' || st === 'reinstall' || st === 'pending') return { cls: 'building', label: st === 'reinstall' ? 'Reinstalling' : 'Building' };
+  if (st === 'expired' || st === 'cancelled') return { cls: 'problem', label: st.charAt(0).toUpperCase() + st.slice(1) };
+  const pw = String(s.powerStatus || 'unknown').toLowerCase();
+  if (pw === 'running') return { cls: 'running', label: 'Running' };
+  if (pw === 'stopped') return { cls: 'stopped', label: 'Stopped' };
+  return { cls: 'stopped', label: st ? st.charAt(0).toUpperCase() + st.slice(1) : 'Unknown' };
+}
+
+function renderServer() {
+  const st = stateOf(SERVER);
+  const pill = document.getElementById('srvPill');
+  pill.className = 'pill ' + st.cls;
+  document.getElementById('srvPillText').textContent = st.label;
+  document.getElementById('srvName').textContent = SERVER.name;
+
+  const building = st.cls === 'building';
+  const canPower = !building && !SERVER.suspended;
+  document.getElementById('btnStart').disabled = !canPower;
+  document.getElementById('btnStop').disabled = !canPower;
+  document.getElementById('btnRestart').disabled = !canPower;
+
+  document.getElementById('priceNow').textContent = money(SERVER.retailCents);
+  document.getElementById('renewNow').textContent = money(SERVER.renewCents);
+  document.getElementById('expiresNow').textContent = SERVER.expiresAt ? SERVER.expiresAt.slice(0, 16) + ' UTC' : '—';
+  document.getElementById('walletNow').textContent = money(WALLET_CENTS);
+  document.getElementById('autoRenewToggle').checked = !!SERVER.autoRenew;
+
+  const host = SERVER.primaryIpv4 || SERVER.primaryIpv6 || null;
+  const user = SERVER.sshUser || 'root';
+  document.getElementById('sshLine').textContent = host ? (user + '@' + host) : 'IP pending — server is still building';
+  document.getElementById('pwLine').textContent = CREDS && CREDS.password ? '••••••••••••' : 'not stored';
+
+  if (building) {
+    alertBox('Your server is being built. IP addresses and live metrics appear as soon as the provider reports it as active — this page refreshes automatically.', 'info');
+  } else if (SERVER.suspended) {
+    alertBox('This server is suspended' + (SERVER.suspendedReason ? ': ' + esc(SERVER.suspendedReason) : '') + '. Please contact support.', 'error');
+  } else if (SERVER.lastError) {
+    alertBox('Last provider error: ' + esc(SERVER.lastError), 'warn');
+  } else {
+    alertBox('');
+  }
+}
+
+function revealAndCopy() {
+  if (!CREDS || !CREDS.password) { toast('No password is stored for this server.', 'error'); return; }
+  const el = document.getElementById('pwLine');
+  if (el.dataset.shown === '1') { el.textContent = '••••••••••••'; el.dataset.shown = '0'; return; }
+  el.textContent = CREDS.password;
+  el.dataset.shown = '1';
+  copyText(CREDS.password);
+}
+
+async function power(action) {
+  const labels = { start: 'start', stop: 'hard-stop', restart: 'restart' };
+  const ok = await confirmBox(
+    action.charAt(0).toUpperCase() + action.slice(1) + ' server',
+    'Really ' + labels[action] + ' "' + SERVER.name + '"?' + (action === 'stop' ? ' Unsaved work inside the OS will be lost.' : ''),
+    action !== 'start'
+  );
+  if (!ok) return;
+  try {
+    toast('Sending ' + action + '…');
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/power', { method: 'POST', body: { action: action } });
+    if (data.server) SERVER = data.server;
+    renderServer();
+    toast(action + ' accepted', 'success');
+    setTimeout(loadStatus, 4000);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function openConsole() {
+  try {
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/console');
+    if (data.consoleUrl) window.open(data.consoleUrl, '_blank', 'noopener');
+    else toast('The provider did not return a console link.', 'error');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function refresh() {
+  try {
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/refresh?credentials=1', { method: 'POST' });
+    if (data.server) SERVER = data.server;
+    if (data.server && data.server.credentials) CREDS = data.server.credentials;
+    renderServer();
+    if (data.status) paintStatus(data.status);
+    toast('Refreshed from provider', 'success');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function loadStatus() {
+  try {
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/status');
+    paintStatus(data.status);
+  } catch (_err) { /* status is best-effort while building */ }
+}
+
+function paintStatus(s) {
+  if (!s) return;
+  const cpu = s.cpu === null || s.cpu === undefined ? null : Number(s.cpu);
+  document.getElementById('mCpu').textContent = cpu === null ? '—' : cpu.toFixed(1) + ' %';
+  document.getElementById('bCpu').style.width = Math.max(0, Math.min(100, cpu || 0)) + '%';
+
+  if (s.memory && s.memory.total) {
+    const pct = Math.round((s.memory.used / s.memory.total) * 100);
+    document.getElementById('mMem').textContent = pct + ' %';
+    document.getElementById('bMem').style.width = pct + '%';
+  } else {
+    document.getElementById('mMem').textContent = '—';
+    document.getElementById('bMem').style.width = '0%';
+  }
+
+  if (s.disk && s.disk.total) {
+    const pct = Math.round((s.disk.used / s.disk.total) * 100);
+    document.getElementById('mDisk').textContent = pct + ' % (' + s.disk.used + '/' + s.disk.total + ' GB)';
+    document.getElementById('bDisk').style.width = pct + '%';
+  } else {
+    document.getElementById('mDisk').textContent = 'guest agent n/a';
+    document.getElementById('bDisk').style.width = '0%';
+  }
+
+  document.getElementById('mUptime').textContent = uptimeLabel(s.uptime);
+  document.getElementById('statusTime').textContent = s.status ? '· ' + s.status : '';
+
+  if (s.state && String(s.state) !== SERVER.state) { SERVER.state = s.state; renderServer(); }
+  if (s.status && String(s.status) !== SERVER.powerStatus) { SERVER.powerStatus = s.status; renderServer(); }
+}
+
+async function loadNetwork() {
+  const box = document.getElementById('networkBox');
+  try {
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/network');
+    const n = data.network || {};
+    const rows = [];
+    (n.ipv4 || []).forEach(function (a) {
+      rows.push('<tr><td>IPv4' + (a.main ? ' (main)' : '') + '</td><td class="mono">' + esc(a.ip) + '/' + a.prefix + '</td><td class="mono">' + esc(a.gateway || '—') + '</td></tr>');
+    });
+    (n.ipv6 || []).forEach(function (a) {
+      rows.push('<tr><td>IPv6' + (a.main ? ' (main)' : '') + '</td><td class="mono">' + esc(a.ip) + '/' + a.prefix + '</td><td class="mono">' + esc(a.gateway || '—') + '</td></tr>');
+    });
+    box.innerHTML = rows.length
+      ? '<table class="mini"><thead><tr><th>Type</th><th>Address</th><th>Gateway</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>'
+      : 'No addresses published yet.';
+  } catch (err) {
+    box.innerHTML = '<span style="color:#F59E0B">' + esc(err.message) + '</span>';
+  }
+}
+
+async function loadFirewall() {
+  const box = document.getElementById('firewallBox');
+  try {
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/firewall');
+    const fw = data.firewall || {};
+    const rows = (fw.rules || []).map(function (r) {
+      return '<tr>' +
+        '<td>' + r.pos + '</td>' +
+        '<td>' + esc(r.type) + '</td>' +
+        '<td style="color:' + (r.action === 'ACCEPT' ? '#10B981' : '#F87171') + '">' + esc(r.action) + '</td>' +
+        '<td>' + esc(r.protocol || 'all') + '</td>' +
+        '<td class="mono">' + esc(r.destinationPort || '—') + '</td>' +
+        '<td>' + esc(r.comment || '') + (r.locked ? ' <span style="color:#F59E0B">[managed]</span>' : '') + '</td>' +
+        '<td>' + (r.enabled ? 'on' : 'off') + '</td>' +
+      '</tr>';
+    }).join('');
+    box.innerHTML =
+      '<div style="font-size:12px;color:var(--text-muted);margin-bottom:9px">Policy in: <strong>' + esc(fw.policyIn) + '</strong> · out: <strong>' + esc(fw.policyOut) + '</strong></div>' +
+      (rows ? '<table class="mini"><thead><tr><th>#</th><th>Dir</th><th>Action</th><th>Proto</th><th>Port</th><th>Comment</th><th>Enabled</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<em>No rules.</em>');
+  } catch (err) {
+    box.innerHTML = '<span style="color:#F59E0B">' + esc(err.message) + '</span>';
+  }
+}
+
+async function loadStats() {
+  const box = document.getElementById('statsBox');
+  const period = document.getElementById('statPeriod').value;
+  box.textContent = 'Loading…';
+  try {
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/statistics?period=' + period);
+    const s = data.statistics || {};
+    const sum = s.summary || {};
+    const pts = s.points || [];
+    if (!pts.length) { box.innerHTML = '<em>No datapoints for this period.</em>'; return; }
+    const maxCpu = Math.max(1, ...pts.map(function (p) { return p.cpu || 0; }));
+    const maxMem = Math.max(1, ...pts.map(function (p) { return p.memory || 0; }));
+    const bars = pts.slice(-60).map(function (p) {
+      const h = Math.round(((p.cpu || 0) / maxCpu) * 46);
+      const hm = Math.round(((p.memory || 0) / maxMem) * 46);
+      return '<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;align-items:center" title="' + esc(p.time) + ' — CPU ' + (p.cpu || 0) + '%, RAM ' + (p.memory || 0) + '%">' +
+        '<div style="width:100%;height:' + h + 'px;background:linear-gradient(180deg,#818cf8,#6366F1);border-radius:2px"></div>' +
+        '<div style="width:100%;height:' + hm + 'px;background:rgba(34,211,238,.55);border-radius:2px"></div>' +
+      '</div>';
+    }).join('');
+    box.innerHTML =
+      '<div class="meters" style="margin-bottom:12px">' +
+        '<div class="meter"><div class="label">CPU avg / max</div><div class="value" style="font-size:15px">' + ((sum.cpu && sum.cpu.average) || 0) + '% / ' + ((sum.cpu && sum.cpu.max) || 0) + '%</div></div>' +
+        '<div class="meter"><div class="label">RAM avg / max</div><div class="value" style="font-size:15px">' + ((sum.memory && sum.memory.average) || 0) + '% / ' + ((sum.memory && sum.memory.max) || 0) + '%</div></div>' +
+        '<div class="meter"><div class="label">Traffic in / out</div><div class="value" style="font-size:15px">' + bytes((sum.traffic && sum.traffic.in) || 0) + ' / ' + bytes((sum.traffic && sum.traffic.out) || 0) + '</div></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:2px;align-items:flex-end;height:52px">' + bars + '</div>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:7px">Indigo = CPU %, cyan = memory %, oldest → newest (' + pts.length + ' points).</div>';
+  } catch (err) {
+    box.innerHTML = '<span style="color:#F59E0B">' + esc(err.message) + '</span>';
+  }
+}
+
+function bytes(n) {
+  if (!n) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0; let v = Number(n);
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+function openPasswordModal() { document.getElementById('pwOverlay').classList.add('open'); }
+async function submitPassword() {
+  const pw = document.getElementById('newPw').value;
+  try {
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/password', { method: 'POST', body: { password: pw } });
+    CREDS = data.credentials;
+    document.getElementById('pwOverlay').classList.remove('open');
+    document.getElementById('newPw').value = '';
+    document.getElementById('pwLine').textContent = '••••••••••••';
+    document.getElementById('pwLine').dataset.shown = '0';
+    toast('Root password updated', 'success');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function openReinstallModal() {
+  document.getElementById('reinstallConfirm').value = '';
+  document.getElementById('reinstallResult').innerHTML = '';
+  document.getElementById('reinstallOverlay').classList.add('open');
+}
+async function submitReinstall() {
+  if (document.getElementById('reinstallConfirm').value.trim() !== 'REINSTALL') {
+    document.getElementById('reinstallResult').innerHTML = '<div class="alert alert-error">Type REINSTALL to confirm.</div>';
+    return;
+  }
+  const os = document.getElementById('reinstallOs').value;
+  try {
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/reinstall', {
+      method: 'POST', body: { os: os, confirm: true },
+    });
+    if (data.credentials) {
+      CREDS = data.credentials;
+      document.getElementById('reinstallResult').innerHTML =
+        '<div class="alert alert-success">Reinstall started. New login:<br><strong>' + esc(data.credentials.username) + ' / ' + esc(data.credentials.password) + '</strong></div>';
+    } else {
+      document.getElementById('reinstallResult').innerHTML = '<div class="alert alert-success">Reinstall started.</div>';
+    }
+    SERVER.state = data.state || 'reinstall';
+    renderServer();
+    toast('Reinstall started', 'success');
+    setTimeout(function () { document.getElementById('reinstallOverlay').classList.remove('open'); refresh(); }, 3500);
+  } catch (err) {
+    document.getElementById('reinstallResult').innerHTML = '<div class="alert alert-error">' + esc(err.message) + '</div>';
+  }
+}
+
+async function toggleAutoRenew() {
+  const el = document.getElementById('autoRenewToggle');
+  try {
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/autorenew', {
+      method: 'PUT', body: { autoRenew: el.checked },
+    });
+    if (data.server) SERVER = data.server;
+    toast('Auto-renew ' + (el.checked ? 'enabled' : 'disabled'), 'success');
+  } catch (err) {
+    el.checked = !el.checked;
+    toast(err.message, 'error');
+  }
+}
+
+async function renewNow() {
+  try {
+    const quote = await api('/api/v1/reseller/servers/' + SERVER_ID + '/renewal');
+    const ok = await confirmBox(
+      'Renew this server',
+      'Renewing charges ' + money(quote.retailCents) + ' from your panel credit (you have ' + money(quote.walletBalanceCents) +
+      ') and extends the server by ' + (SERVER.durationMonths || 1) + ' month(s).' +
+      (quote.sufficient ? '' : ' You do not have enough credit — contact support first.'),
+      false
+    );
+    if (!ok) return;
+    if (!quote.sufficient) { toast('Insufficient credit for this renewal.', 'error'); return; }
+    const data = await api('/api/v1/reseller/servers/' + SERVER_ID + '/renew', { method: 'POST' });
+    if (data.server) SERVER = data.server;
+    WALLET_CENTS = data.walletBalanceCents;
+    renderServer();
+    toast('Renewed — charged ' + money(data.chargedCents), 'success');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+renderServer();
+loadStatus();
+loadNetwork();
+loadFirewall();
+loadStats();
+
+// Poll while the server is still building, then settle to a slower cadence.
+setInterval(function () {
+  const st = stateOf(SERVER);
+  if (st.cls === 'building') { refresh(); loadStatus(); loadNetwork(); }
+  else { loadStatus(); }
+}, 15000);
+</script>
+</body>
+</html>

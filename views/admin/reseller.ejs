@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0f">
+  <title><%= title || 'Reseller - TGVPANEL' %></title>
+  <link rel="icon" href="<%= siteLogo %>" type="image/png">
+  <link rel="stylesheet" href="/css/admin.css">
+  <style>
+    .rs-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle); }
+    .rs-head h1 { margin: 0 0 5px 0; font-size: 22px; color: var(--text-primary); }
+    .rs-head p { margin: 0; font-size: 13px; color: var(--text-muted); max-width: 780px; }
+
+    .rs-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 13px; margin-bottom: 18px; }
+    .rs-stat { position: relative; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 12px; padding: 14px 16px; overflow: hidden; }
+    .rs-stat::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent, #6366F1); }
+    .rs-stat .label { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-muted); margin-bottom: 6px; }
+    .rs-stat .value { font-size: 21px; font-weight: 800; color: var(--text-primary); line-height: 1.1; }
+    .rs-stat .sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+    .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px; }
+    .tab { padding: 9px 15px; font-size: 13px; font-weight: 600; color: var(--text-muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; }
+    .tab:hover { color: var(--text-primary); }
+    .tab.active { color: #818cf8; border-bottom-color: #6366F1; }
+    .pane { display: none; }
+    .pane.active { display: block; }
+
+    .card { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 13px; padding: 17px; margin-bottom: 16px; }
+    .card h3 { margin: 0 0 13px 0; font-size: 14px; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .card h3 .note { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+
+    .f-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+    .f { display: flex; flex-direction: column; gap: 5px; }
+    .f.full { grid-column: 1 / -1; }
+    .f label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+    .f input, .f select, .f textarea { padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(255,255,255,.03); color: var(--text-primary); font-size: 13px; font-family: inherit; }
+    .f input:focus, .f select:focus, .f textarea:focus { outline: none; border-color: #6366F1; box-shadow: 0 0 0 3px rgba(99,102,241,.12); }
+    .f .hint { font-size: 11px; color: var(--text-muted); line-height: 1.45; }
+
+    .btn { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .btn:hover { color: var(--text-primary); border-color: #6366F1; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-primary { background: linear-gradient(135deg,#6366F1,#8B5CF6); border: none; color: #fff; }
+    .btn-primary:hover { color: #fff; filter: brightness(1.08); }
+    .btn-danger { border-color: rgba(239,68,68,.4); color: #F87171; }
+    .btn-danger:hover { background: rgba(239,68,68,.12); color: #FCA5A5; }
+    .btn-sm { padding: 5px 10px; font-size: 11px; }
+
+    table.grid { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table.grid th, table.grid td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); vertical-align: middle; }
+    table.grid th { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); position: sticky; top: 0; background: var(--bg-card); }
+    table.grid td.mono { font-family: 'SF Mono', ui-monospace, monospace; font-size: 11px; }
+    table.grid td strong { color: var(--text-primary); }
+    table.grid tr:hover td { background: rgba(255,255,255,.02); }
+    .table-wrap { overflow-x: auto; max-height: 620px; overflow-y: auto; }
+    table.grid input.cell, table.grid select.cell { padding: 5px 7px; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(255,255,255,.03); color: var(--text-primary); font-size: 12px; width: 100%; min-width: 70px; }
+
+    .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
+    .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .pill.ok, .pill.running, .pill.active, .pill.provisioned, .pill.success { background: rgba(16,185,129,.15); color: #10B981; }
+    .pill.off, .pill.stopped, .pill.disabled { background: rgba(107,114,128,.2); color: #9CA3AF; }
+    .pill.warn, .pill.pending, .pill.provisioning, .pill.install { background: rgba(245,158,11,.17); color: #F59E0B; }
+    .pill.err, .pill.failed, .pill.error, .pill.suspended { background: rgba(239,68,68,.15); color: #F87171; }
+    .pill.info { background: rgba(6,182,212,.14); color: #22D3EE; }
+
+    .alert { border-radius: 10px; padding: 11px 14px; font-size: 13px; margin-bottom: 12px; line-height: 1.5; }
+    .alert-error { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.32); color: #F87171; }
+    .alert-info { background: rgba(6,182,212,.10); border: 1px solid rgba(6,182,212,.28); color: #22D3EE; }
+    .alert-success { background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.32); color: #34D399; }
+    .alert-warn { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.32); color: #FBBF24; }
+
+    .switch { position: relative; display: inline-block; width: 38px; height: 21px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch .slider { position: absolute; inset: 0; background: rgba(255,255,255,.12); border-radius: 999px; transition: .2s; cursor: pointer; }
+    .switch .slider:before { content: ''; position: absolute; height: 15px; width: 15px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+    .switch input:checked + .slider { background: #6366F1; }
+    .switch input:checked + .slider:before { transform: translateX(17px); }
+
+    .log-line { font-family: 'SF Mono', ui-monospace, monospace; font-size: 11px; padding: 6px 9px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); display: grid; grid-template-columns: 62px 52px 1fr 60px 74px; gap: 9px; align-items: center; }
+    .log-line .m { font-weight: 700; color: #818cf8; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.76); z-index: 2500; display: none; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(5px); overflow-y: auto; }
+    .overlay.open { display: flex; }
+    .overlay-card { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 13px; max-width: 560px; width: 100%; padding: 20px; }
+    .overlay-card h3 { margin: 0 0 9px 0; font-size: 16px; color: var(--text-primary); }
+    .overlay-card p { margin: 0 0 15px 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+    .toast-wrap { position: fixed; right: 18px; bottom: 18px; z-index: 3000; display: flex; flex-direction: column; gap: 8px; }
+    .toast { background: var(--bg-card); border: 1px solid var(--border-card); border-left: 3px solid #6366F1; border-radius: 10px; padding: 11px 15px; font-size: 13px; color: var(--text-primary); box-shadow: 0 12px 30px rgba(0,0,0,.45); max-width: 400px; }
+    .toast.error { border-left-color: #EF4444; }
+    .toast.success { border-left-color: #10B981; }
+    .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+  </style>
+</head>
+<body>
+
+<div class="admin-wrapper">
+  <%- include('../partials/admin/sidebar') %>
+
+  <div class="admin-main">
+    <%- include('../partials/admin/header') %>
+
+    <div class="admin-content">
+
+      <div class="rs-head">
+        <div>
+          <h1>Reseller &amp; Upstream Provisioning</h1>
+          <p>
+            Sell servers from your upstream provider (Bukkit-Hosting, Düsseldorf). Sync their catalogue,
+            set your own retail prices, and let customers provision instantly from the
+            <a href="/store" style="color:#818cf8">storefront</a>. Orders go out with an idempotency key, so a
+            timeout never buys the same server twice.
+          </p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="loadStatus(true)">Probe provider</button>
+          <button class="btn" onclick="syncCatalogue()">Sync catalogue</button>
+          <button class="btn btn-primary" onclick="runSyncLoop()">Run reconciliation</button>
+        </div>
+      </div>
+
+      <div id="alerts">
+        <% if (!status) { %>
+          <div class="alert alert-error">Could not load reseller status.</div>
+        <% } else if (!status.configured) { %>
+          <div class="alert alert-warn">
+            <strong>No upstream API key configured.</strong>
+            Add your reseller API key on the <button class="btn btn-sm" onclick="showTab('provider')" style="margin:0 4px">Provider</button> tab.
+            Nothing is sold until a key is set and the integration is enabled.
+          </div>
+        <% } else if (!status.enabled) { %>
+          <div class="alert alert-info">The integration is configured but <strong>disabled</strong>. Enable it on the Provider tab to start selling.</div>
+        <% } else if (!status.upstream.reachable) { %>
+          <div class="alert alert-error">
+            Provider unreachable: <%= status.upstream.error || 'unknown error' %>
+            <% if (status.upstream.errorCode) { %>(code <code><%= status.upstream.errorCode %></code>)<% } %>
+          </div>
+        <% } else if (status.lowBalanceAlert) { %>
+          <div class="alert alert-warn">
+            Upstream balance is low: <strong><%= ((status.upstream.balanceCents || 0) / 100).toFixed(2) %> EUR</strong>.
+            New orders fail with <code>insufficient_balance</code> once it runs out.
+          </div>
+        <% } %>
+      </div>
+
+      <div class="rs-stats" id="statStrip"></div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="provider" onclick="showTab('provider')">Provider</button>
+        <button class="tab" data-tab="catalogue" onclick="showTab('catalogue')">Catalogue &amp; pricing</button>
+        <button class="tab" data-tab="orders" onclick="showTab('orders')">Orders</button>
+        <button class="tab" data-tab="fleet" onclick="showTab('fleet')">Fleet</button>
+        <button class="tab" data-tab="wallets" onclick="showTab('wallets')">Customer credit</button>
+        <button class="tab" data-tab="logs" onclick="showTab('logs')">Upstream API log</button>
+      </div>
+
+      <!-- ============================ PROVIDER ============================ -->
+      <div class="pane active" id="pane-provider">
+        <div class="two-col">
+          <div class="card">
+            <h3>Upstream connection <span class="note" id="connNote"></span></h3>
+            <div class="f-grid">
+              <div class="f full">
+                <label for="cfgApiKey">Reseller API key</label>
+                <input id="cfgApiKey" type="password" autocomplete="off" placeholder="<%= status && status.keyHint ? 'stored: ' + status.keyHint : 'bkkt_…' %>">
+                <div class="hint">
+                  Stored AES-256-GCM encrypted in the panel vault — never in plaintext, never sent to the browser again.
+                  Leave empty to keep the current key. You can also set <code>RESELLER_API_KEY</code> in <code>.env</code>.
+                </div>
+              </div>
+              <div class="f full">
+                <label for="cfgBaseUrl">API base URL</label>
+                <input id="cfgBaseUrl" type="text" value="<%= status ? status.baseUrl : 'https://bukkit-hosting.eu/api/v2' %>">
+                <div class="hint">Provider API v2 root, without a trailing slash.</div>
+              </div>
+              <div class="f">
+                <label for="cfgTimeout">Request timeout (ms)</label>
+                <input id="cfgTimeout" type="number" min="2000" max="120000" step="500">
+              </div>
+              <div class="f">
+                <label for="cfgLowBalance">Low-balance alert (EUR)</label>
+                <input id="cfgLowBalance" type="number" min="0" step="1">
+                <div class="hint">Admins get a notification below this upstream balance.</div>
+              </div>
+              <div class="f">
+                <label for="cfgPoll">Reconciliation interval (s)</label>
+                <input id="cfgPoll" type="number" min="10" max="3600">
+                <div class="hint">How often queued orders are retried and server states/IPs refreshed.</div>
+              </div>
+              <div class="f">
+                <label for="cfgSync">Catalogue sync interval (s)</label>
+                <input id="cfgSync" type="number" min="300" max="86400">
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="saveConfig()">Save connection</button>
+              <button class="btn" onclick="testConnection()">Test connection</button>
+              <button class="btn btn-danger" onclick="clearKey()">Remove API key</button>
+            </div>
+          </div>
+
+          <div>
+            <div class="card">
+              <h3>Selling</h3>
+              <div class="f-grid">
+                <div class="f">
+                  <label>Integration enabled</label>
+                  <label class="switch"><input type="checkbox" id="cfgEnabled"><span class="slider"></span></label>
+                  <div class="hint">Master switch for all upstream calls.</div>
+                </div>
+                <div class="f">
+                  <label>Storefront open</label>
+                  <label class="switch"><input type="checkbox" id="cfgStore"><span class="slider"></span></label>
+                  <div class="hint">Lets customers order from /store themselves.</div>
+                </div>
+                <div class="f">
+                  <label>Auto-renew by default</label>
+                  <label class="switch"><input type="checkbox" id="cfgAutoRenew"><span class="slider"></span></label>
+                  <div class="hint">Pre-ticks auto-renewal at checkout.</div>
+                </div>
+                <div class="f">
+                  <label>Allow custom configs</label>
+                  <label class="switch"><input type="checkbox" id="cfgConfigurator"><span class="slider"></span></label>
+                  <div class="hint">Lets staff build plans from the provider configurator.</div>
+                </div>
+                <div class="f">
+                  <label for="cfgMarkup">Default markup (%)</label>
+                  <input id="cfgMarkup" type="number" min="-90" max="1000" step="1">
+                  <div class="hint">Applied to newly synced plans. Hand-set prices are never overwritten.</div>
+                </div>
+                <div class="f full">
+                  <label for="cfgTos">Checkout terms text</label>
+                  <textarea id="cfgTos" rows="3" placeholder="I accept the terms of service and the privacy policy."></textarea>
+                </div>
+              </div>
+              <div style="margin-top:14px"><button class="btn btn-primary" onclick="saveConfig()">Save selling settings</button></div>
+            </div>
+
+            <div class="card">
+              <h3>Upstream account</h3>
+              <div id="upstreamBox" style="font-size:13px;color:var(--text-muted)">Not probed yet.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ CATALOGUE ============================ -->
+      <div class="pane" id="pane-catalogue">
+        <div class="card">
+          <h3>
+            Sellable plans
+            <span class="note">
+              Cost = what you pay upstream · Retail = what the customer pays you.
+              New plans from a sync start disabled — enable them deliberately.
+            </span>
+          </h3>
+          <div style="display:flex;gap:8px;margin-bottom:13px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="syncCatalogue()">Sync from provider</button>
+            <button class="btn" onclick="openConfigPlan()">+ Custom configuration plan</button>
+            <span style="flex:1"></span>
+            <input id="planFilter" class="cell" style="max-width:220px;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,.03);color:var(--text-primary);font-size:12px" placeholder="Filter by name or CPU…" oninput="renderPlans()">
+          </div>
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th>On</th><th>Plan</th><th>CPU</th><th>vCPU</th><th>RAM</th><th>Disk</th>
+                  <th>Net</th><th>IPs</th><th>Cost</th><th>Retail</th><th>Renew</th><th>Setup</th>
+                  <th>Margin</th><th>Vis</th><th>Stock</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="planRows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Operating systems <span class="note">synced from GET /kvm/os</span></h3>
+          <div class="table-wrap" style="max-height:320px">
+            <table class="grid">
+              <thead><tr><th>Upstream id</th><th>Name</th><th>Family</th><th>Windows</th><th>Min disk</th><th>Order</th><th></th></tr></thead>
+              <tbody id="osRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ ORDERS ============================ -->
+      <div class="pane" id="pane-orders">
+        <div class="card">
+          <h3>
+            Order queue
+            <span class="note">
+              <code>pending</code> orders are retried automatically with the same idempotency key — the provider
+              replays its stored response instead of selling a second server.
+            </span>
+          </h3>
+          <div style="display:flex;gap:8px;margin-bottom:13px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="openAdminOrder()">+ Order for a customer</button>
+            <button class="btn" onclick="runSyncLoop()">Run reconciliation now</button>
+            <select id="orderFilter" class="cell" style="max-width:180px;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,.03);color:var(--text-primary);font-size:12px" onchange="loadOrders()">
+              <option value="">All statuses</option>
+              <option value="pending">pending</option>
+              <option value="provisioning">provisioning</option>
+              <option value="provisioned">provisioned</option>
+              <option value="failed">failed</option>
+              <option value="cancelled">cancelled</option>
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr><th>Ref</th><th>Customer</th><th>Server</th><th>Plan</th><th>Status</th><th>Charged</th><th>Cost</th><th>Upstream</th><th>Created</th><th></th></tr>
+              </thead>
+              <tbody id="orderRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ FLEET ============================ -->
+      <div class="pane" id="pane-fleet">
+        <div class="card">
+          <h3>Provisioned servers <span class="note" id="fleetNote"></span></h3>
+          <div style="display:flex;gap:8px;margin-bottom:13px;flex-wrap:wrap">
+            <button class="btn" onclick="loadServers()">Reload</button>
+            <input id="fleetFilter" class="cell" style="max-width:240px;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,.03);color:var(--text-primary);font-size:12px" placeholder="Search name or IP…" oninput="renderServers()">
+          </div>
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr><th>Server</th><th>Owner</th><th>Spec</th><th>IP</th><th>State</th><th>Retail</th><th>Cost</th><th>Margin</th><th>Expires</th><th></th></tr>
+              </thead>
+              <tbody id="serverRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ WALLETS ============================ -->
+      <div class="pane" id="pane-wallets">
+        <div class="card">
+          <h3>
+            Customer credit
+            <span class="note">
+              The wallet is a ledger: every cent is traceable to a grant, an order or a renewal.
+              Grant credit when a customer pays you; their orders are deducted automatically.
+            </span>
+          </h3>
+          <div class="table-wrap">
+            <table class="grid">
+              <thead><tr><th>Customer</th><th>Email</th><th>Role</th><th>Balance</th><th>Servers</th><th></th></tr></thead>
+              <tbody id="walletRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ LOGS ============================ -->
+      <div class="pane" id="pane-logs">
+        <div class="card">
+          <h3>Upstream API log <span class="note">passwords, tokens and console links are redacted</span>
+            <button class="btn btn-sm" onclick="loadLogs()">Reload</button>
+          </h3>
+          <div id="logBox" style="max-height:640px;overflow-y:auto"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <%- include('../partials/admin/footer') %>
+  </div>
+</div>
+
+<!-- ======================= custom configuration plan ======================= -->
+<div class="overlay" id="cfgPlanOverlay">
+  <div class="overlay-card">
+    <h3>Custom configuration plan</h3>
+    <p>Builds a sellable plan from the provider configurator. Pricing is quoted live at your configured markup.</p>
+    <div id="cfgPlanLimits" class="alert alert-info" style="display:none"></div>
+    <div class="f-grid">
+      <div class="f">
+        <label for="cpCpu">CPU family</label>
+        <select id="cpCpu" onchange="loadConfigurator()"><option value="">Loading…</option></select>
+      </div>
+      <div class="f"><label for="cpCores">vCPU cores</label><input id="cpCores" type="number" min="1" value="4" onchange="priceConfig()"></div>
+      <div class="f"><label for="cpMemory">RAM (GB)</label><input id="cpMemory" type="number" min="1" value="8" onchange="priceConfig()"></div>
+      <div class="f"><label for="cpDisk">Storage (GB)</label><input id="cpDisk" type="number" min="10" value="100" onchange="priceConfig()"></div>
+      <div class="f"><label for="cpIpv4">IPv4 addresses</label><input id="cpIpv4" type="number" min="0" value="1" onchange="priceConfig()"></div>
+      <div class="f"><label for="cpIpv6">IPv6 networks</label><input id="cpIpv6" type="number" min="0" value="1" onchange="priceConfig()"></div>
+      <div class="f"><label for="cpMarkup">Markup (%) <span style="text-transform:none;font-weight:500">(blank = default)</span></label><input id="cpMarkup" type="number" min="-90" max="1000" onchange="priceConfig()"></div>
+      <div class="f"><label for="cpSetup">One-off setup (EUR)</label><input id="cpSetup" type="number" min="0" step="0.5" value="0"></div>
+      <div class="f full"><label for="cpName">Display name <span style="text-transform:none;font-weight:500">(optional)</span></label><input id="cpName" type="text" maxlength="120"></div>
+      <div class="f full"><label for="cpDesc">Description <span style="text-transform:none;font-weight:500">(optional)</span></label><textarea id="cpDesc" rows="2" maxlength="1000"></textarea></div>
+    </div>
+    <div id="cpQuote" class="alert alert-info" style="margin-top:12px">Choose a CPU family to price this configuration.</div>
+    <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:14px">
+      <button class="btn" onclick="document.getElementById('cfgPlanOverlay').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="createConfigPlan()">Create plan</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= admin order for customer ======================= -->
+<div class="overlay" id="adminOrderOverlay">
+  <div class="overlay-card">
+    <h3>Order a server for a customer</h3>
+    <p>Provisions immediately upstream. Choose how it is billed on your side.</p>
+    <div class="f-grid">
+      <div class="f full">
+        <label for="aoUser">Customer</label>
+        <select id="aoUser"></select>
+      </div>
+      <div class="f full">
+        <label for="aoPlan">Plan</label>
+        <select id="aoPlan" onchange="aoPrice()"></select>
+      </div>
+      <div class="f full">
+        <label for="aoOs">Operating system</label>
+        <select id="aoOs"></select>
+      </div>
+      <div class="f"><label for="aoName">Server name <span style="text-transform:none;font-weight:500">(optional)</span></label><input id="aoName" type="text" maxlength="50"></div>
+      <div class="f"><label for="aoHostname">Hostname <span style="text-transform:none;font-weight:500">(optional)</span></label><input id="aoHostname" type="text" maxlength="63"></div>
+      <div class="f">
+        <label for="aoPayment">Billing</label>
+        <select id="aoPayment">
+          <option value="wallet">Deduct from customer credit</option>
+          <option value="manual">Billed outside the panel</option>
+          <option value="free">Comped (no charge)</option>
+        </select>
+      </div>
+      <div class="f"><label for="aoAutoRenew">Auto-renew</label>
+        <select id="aoAutoRenew"><option value="1">Yes</option><option value="0">No</option></select>
+      </div>
+      <div class="f full"><label for="aoNotes">Internal note <span style="text-transform:none;font-weight:500">(optional)</span></label><input id="aoNotes" type="text" maxlength="255"></div>
+    </div>
+    <div id="aoResult"></div>
+    <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:14px">
+      <button class="btn" onclick="document.getElementById('adminOrderOverlay').classList.remove('open')">Close</button>
+      <button class="btn btn-primary" id="aoSubmit" onclick="submitAdminOrder()">Provision now</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= wallet adjust ======================= -->
+<div class="overlay" id="walletOverlay">
+  <div class="overlay-card">
+    <h3 id="wTitle">Adjust credit</h3>
+    <p id="wSubtitle"></p>
+    <div class="f-grid">
+      <div class="f">
+        <label for="wAmount">Amount (EUR)</label>
+        <input id="wAmount" type="number" step="0.01" placeholder="25.00">
+        <div class="hint">Positive adds credit, negative withdraws it.</div>
+      </div>
+      <div class="f">
+        <label for="wKind">Reason</label>
+        <select id="wKind">
+          <option value="credit">Credit top-up</option>
+          <option value="refund">Refund</option>
+          <option value="adjustment">Manual adjustment</option>
+          <option value="debit">Withdrawal</option>
+        </select>
+      </div>
+      <div class="f full"><label for="wDesc">Note <span style="text-transform:none;font-weight:500">(optional)</span></label><input id="wDesc" type="text" maxlength="255" placeholder="Bank transfer received 2026-11-08"></div>
+    </div>
+    <div id="wLedger" style="margin-top:14px"></div>
+    <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:14px">
+      <button class="btn" onclick="document.getElementById('walletOverlay').classList.remove('open')">Close</button>
+      <button class="btn btn-primary" onclick="submitWallet()">Apply</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Admin reseller console. All money is integer cents from the API.
+// ---------------------------------------------------------------------------
+const PLANS = <%- JSON.stringify(plans) %>;
+const OS_IMAGES = <%- JSON.stringify(osImages) %>;
+const USERS = <%- JSON.stringify(users) %>;
+const WALLETS = <%- JSON.stringify(wallets) %>;
+const SERVERS = <%- JSON.stringify(servers) %>;
+const ORDERS = <%- JSON.stringify(orders) %>;
+let STATUS = <%- JSON.stringify(status) %>;
+let walletUserId = null;
+
+function money(cents) {
+  if (cents === null || cents === undefined || isNaN(cents)) return '—';
+  const n = Math.round(Number(cents));
+  return (n < 0 ? '-' : '') + (Math.abs(n) / 100).toFixed(2) + ' €';
+}
+function esc(v) {
+  return String(v === null || v === undefined ? '' : v).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function toast(msg, type) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || '');
+  el.textContent = msg;
+  document.getElementById('toastWrap').appendChild(el);
+  setTimeout(() => el.remove(), 5200);
+}
+async function api(url, options) {
+  const opts = Object.assign({ method: 'GET', cache: 'no-store', headers: {} }, options || {});
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  if (meta && meta.content) opts.headers['X-CSRF-Token'] = meta.content;
+  if (opts.body && typeof opts.body === 'object') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(opts.body);
+  }
+  const res = await fetch(url, opts);
+  let data = {};
+  try { data = await res.json(); } catch (_e) { data = {}; }
+  if (!res.ok) { const e = new Error(data.error || ('Request failed (HTTP ' + res.status + ')')); e.code = data.code; e.details = data; throw e; }
+  return data;
+}
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
+  document.querySelectorAll('.pane').forEach(function (p) { p.classList.toggle('active', p.id === 'pane-' + name); });
+  if (name === 'orders') loadOrders();
+  if (name === 'fleet') loadServers();
+  if (name === 'wallets') renderWallets();
+  if (name === 'logs') loadLogs();
+}
+
+// ------------------------------- status -----------------------------------
+
+function renderStats() {
+  if (!STATUS) { document.getElementById('statStrip').innerHTML = ''; return; }
+  const u = STATUS.upstream, f = STATUS.fleet, o = STATUS.orders, c = STATUS.catalogue;
+  const cards = [
+    { label: 'Upstream balance', value: u.balanceCents === null ? '—' : money(u.balanceCents), sub: u.reachable ? 'connected · ' + esc(u.account && u.account.username ? u.account.username : '') : (u.errorCode || 'not probed'), accent: u.reachable ? '#10B981' : '#EF4444' },
+    { label: 'Reseller tier', value: u.resellerTier || (u.reseller ? 'yes' : '—'), sub: u.account ? 'role ' + esc(u.account.role) : '', accent: '#8B5CF6' },
+    { label: 'Monthly revenue', value: money(f.monthlyRetailCents), sub: 'cost ' + money(f.monthlyCostCents), accent: '#6366F1' },
+    { label: 'Monthly margin', value: money(f.monthlyMarginCents), sub: f.serversTotal + ' servers (' + f.active + ' active)', accent: '#22D3EE' },
+    { label: 'Published plans', value: c.plansEnabled + ' / ' + c.plansTotal, sub: c.osImages + ' OS images · synced ' + (c.lastSyncAt ? esc(c.lastSyncAt) : 'never'), accent: '#F59E0B' },
+    { label: 'Order queue', value: o.pending + o.provisioning, sub: o.provisioned + ' provisioned · ' + o.failed + ' failed', accent: o.failed ? '#EF4444' : '#10B981' },
+    { label: 'Customer credit', value: money(STATUS.wallet.totalBalanceCents), sub: STATUS.wallet.customersWithCredit + ' customers with credit', accent: '#10B981' },
+    { label: 'Expiring ≤ 7 days', value: f.expiringSoon, sub: f.installing + ' building · ' + f.suspended + ' suspended', accent: f.expiringSoon ? '#F59E0B' : '#6B7280' },
+  ];
+  document.getElementById('statStrip').innerHTML = cards.map(function (c) {
+    return '<div class="rs-stat" style="--accent:' + c.accent + '">' +
+      '<div class="label">' + esc(c.label) + '</div>' +
+      '<div class="value">' + esc(c.value) + '</div>' +
+      '<div class="sub">' + (c.sub || '') + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderConfig() {
+  if (!STATUS) return;
+  document.getElementById('cfgEnabled').checked = !!STATUS.enabled;
+  document.getElementById('cfgStore').checked = !!STATUS.storeEnabled;
+  api('/api/v1/reseller/admin/config').then(function (cfg) {
+    document.getElementById('cfgTimeout').value = cfg.requestTimeoutMs;
+    document.getElementById('cfgLowBalance').value = (cfg.lowBalanceAlertCents / 100).toFixed(2);
+    document.getElementById('cfgPoll').value = cfg.pollIntervalSec;
+    document.getElementById('cfgSync').value = cfg.syncIntervalSec;
+    document.getElementById('cfgMarkup').value = cfg.defaultMarkupPercent;
+    document.getElementById('cfgTos').value = cfg.tosText || '';
+    document.getElementById('cfgAutoRenew').checked = !!cfg.autoRenewDefault;
+    document.getElementById('cfgConfigurator').checked = !!cfg.allowConfigurator;
+    if (cfg.baseUrl) document.getElementById('cfgBaseUrl').value = cfg.baseUrl;
+  }).catch(function (e) { toast(e.message, 'error'); });
+
+  const u = STATUS.upstream;
+  document.getElementById('connNote').textContent = u.checkedAt ? 'last probe ' + u.checkedAt + ' UTC' : '';
+  let html = '';
+  if (!STATUS.configured) {
+    html = '<div class="alert alert-warn">No API key stored yet.</div>';
+  } else if (u.account) {
+    html = '<dl style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px;margin:0">' +
+      '<dt style="color:var(--text-muted)">Upstream user</dt><dd style="margin:0;color:var(--text-primary);font-weight:600">' + esc(u.account.username) + ' (' + esc(u.account.userId) + ')</dd>' +
+      '<dt style="color:var(--text-muted)">Email</dt><dd style="margin:0">' + esc(u.account.email) + '</dd>' +
+      '<dt style="color:var(--text-muted)">Role / state</dt><dd style="margin:0">' + esc(u.account.role) + ' · ' + esc(u.account.state) + '</dd>' +
+      '<dt style="color:var(--text-muted)">API key name</dt><dd style="margin:0">' + esc((u.account.api && u.account.api.keyName) || '—') + '</dd>' +
+      '<dt style="color:var(--text-muted)">Balance</dt><dd style="margin:0;font-weight:700;color:#10B981">' + money(u.balanceCents) + '</dd>' +
+      '<dt style="color:var(--text-muted)">Rate limits</dt><dd style="margin:0">' + (u.rateLimit && u.rateLimit.limit !== null ? u.rateLimit.limit + ' req/min · ' + u.rateLimit.remaining + ' left' : '—') + '</dd>' +
+      '</dl>';
+    if (u.resellerInfo) {
+      const ri = u.resellerInfo;
+      html += '<div style="margin-top:11px;font-size:12px;color:var(--text-muted)">KVM tier <strong style="color:var(--text-primary)">' + esc((ri.kvm && ri.kvm.tier) || '—') + '</strong>' +
+        (ri.productValue ? ' · product value ' + esc(ri.productValue.monthly) + ' EUR/mo (level ' + esc(ri.productValue.level) + ')' : '') + '</div>';
+    }
+  } else {
+    html = '<div class="alert alert-error">' + esc(u.error || 'Provider not reachable') + (u.errorCode ? ' <code>' + esc(u.errorCode) + '</code>' : '') + '</div>';
+  }
+  document.getElementById('upstreamBox').innerHTML = html;
+}
+
+async function loadStatus(probe) {
+  try {
+    STATUS = await api('/api/v1/reseller/admin/status' + (probe === false ? '?probe=0' : ''));
+    renderStats();
+    renderConfig();
+    if (probe === true) toast(STATUS.upstream.reachable ? 'Provider reachable' : 'Provider not reachable', STATUS.upstream.reachable ? 'success' : 'error');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function saveConfig() {
+  const payload = {
+    enabled: document.getElementById('cfgEnabled').checked,
+    storeEnabled: document.getElementById('cfgStore').checked,
+    autoRenewDefault: document.getElementById('cfgAutoRenew').checked,
+    allowConfigurator: document.getElementById('cfgConfigurator').checked,
+    defaultMarkupPercent: Number(document.getElementById('cfgMarkup').value),
+    requestTimeoutMs: Number(document.getElementById('cfgTimeout').value),
+    lowBalanceAlertCents: Math.round(Number(document.getElementById('cfgLowBalance').value || 0) * 100),
+    pollIntervalSec: Number(document.getElementById('cfgPoll').value),
+    syncIntervalSec: Number(document.getElementById('cfgSync').value),
+    baseUrl: document.getElementById('cfgBaseUrl').value.trim(),
+    tosText: document.getElementById('cfgTos').value,
+  };
+  const key = document.getElementById('cfgApiKey').value.trim();
+  if (key) payload.apiKey = key;
+  try {
+    await api('/api/v1/reseller/admin/config', { method: 'PUT', body: payload });
+    document.getElementById('cfgApiKey').value = '';
+    toast('Configuration saved', 'success');
+    loadStatus(true);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function testConnection() {
+  try {
+    toast('Contacting provider…');
+    const r = await api('/api/v1/reseller/admin/test-connection', { method: 'POST' });
+    if (r.ok) {
+      toast('Connected as ' + (r.account ? r.account.username : 'unknown') + ' · balance ' + money(r.balanceCents), 'success');
+    } else {
+      toast('Failed: ' + (r.error || r.errorCode || 'unknown'), 'error');
+    }
+    loadStatus(true);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function clearKey() {
+  if (!confirm('Remove the stored upstream API key? The integration stops working until a new key is set.')) return;
+  try {
+    await api('/api/v1/reseller/admin/config', { method: 'PUT', body: { apiKey: '' } });
+    toast('API key removed', 'success');
+    loadStatus(false);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function syncCatalogue() {
+  try {
+    toast('Syncing catalogue from the provider…');
+    const r = await api('/api/v1/reseller/admin/sync', { method: 'POST' });
+    toast('Synced ' + r.plansUpserted + ' plans (' + r.plansNew + ' new) and ' + r.osUpserted + ' OS images', 'success');
+    if (r.plansNew) toast(r.plansNew + ' new plan(s) were added DISABLED — enable them in the catalogue tab.', 'info');
+    await loadPlans();
+    loadStatus(false);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function runSyncLoop() {
+  try {
+    toast('Running reconciliation…');
+    const r = await api('/api/v1/reseller/admin/sync-loop', { method: 'POST' });
+    toast('Retried ' + r.ordersRetried + ' order(s), ' + r.ordersProvisioned + ' provisioned, ' + r.serversUpdated + ' server(s) refreshed, ' + r.becameActive + ' became active', 'success');
+    if (r.errors && r.errors.length) console.warn('[reseller] reconciliation errors', r.errors);
+    loadStatus(false);
+    loadOrders();
+    loadServers();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ------------------------------- catalogue --------------------------------
+
+async function loadPlans() {
+  try {
+    const r = await api('/api/v1/reseller/admin/plans');
+    PLANS.length = 0;
+    (r.plans || []).forEach(function (p) { PLANS.push(p); });
+    renderPlans();
+    fillAdminOrderPlans();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function renderPlans() {
+  const q = (document.getElementById('planFilter').value || '').toLowerCase();
+  const rows = PLANS.filter(function (p) {
+    if (!q) return true;
+    return (p.display_name + ' ' + (p.cpu_family || '') + ' ' + (p.cpu_label || '')).toLowerCase().includes(q);
+  });
+  const body = document.getElementById('planRows');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="16" style="text-align:center;color:var(--text-muted);padding:22px">No plans yet — sync the catalogue from the provider.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(function (p) {
+    const margin = (p.retail_cents || 0) - (p.cost_cents || 0);
+    const marginPct = p.cost_cents ? Math.round((margin / p.cost_cents) * 100) : 0;
+    return '<tr data-id="' + p.id + '">' +
+      '<td><label class="switch"><input type="checkbox" ' + (p.is_enabled ? 'checked' : '') + ' onchange="togglePlan(' + p.id + ', \'is_enabled\', this.checked)"><span class="slider"></span></label></td>' +
+      '<td><strong>' + esc(p.display_name) + '</strong><div style="font-size:10px;color:var(--text-muted)">' + esc(p.kind) + (p.slug ? ' · ' + esc(p.slug) : '') + '</div></td>' +
+      '<td><span class="pill info">' + esc((p.cpu_label || p.cpu_family || '—')) + '</span></td>' +
+      '<td>' + p.cores + '</td><td>' + p.memory_gb + ' GB</td><td>' + p.disk_gb + ' GB</td>' +
+      '<td>' + p.connection_gbit + ' Gb</td><td>' + p.ipv4_count + '/' + p.ipv6_count + '</td>' +
+      '<td class="mono">' + money(p.cost_cents) + '</td>' +
+      '<td><input class="cell" type="number" step="0.5" value="' + (p.retail_cents / 100).toFixed(2) + '" onchange="setPlanPrice(' + p.id + ', \'retail_cents\', this.value)"></td>' +
+      '<td><input class="cell" type="number" step="0.5" value="' + (p.retail_renew_cents / 100).toFixed(2) + '" onchange="setPlanPrice(' + p.id + ', \'retail_renew_cents\', this.value)"></td>' +
+      '<td><input class="cell" type="number" step="0.5" value="' + (p.setup_cents / 100).toFixed(2) + '" onchange="setPlanPrice(' + p.id + ', \'setup_cents\', this.value)"></td>' +
+      '<td style="color:' + (margin >= 0 ? '#10B981' : '#F87171') + ';font-weight:700">' + money(margin) + '<div style="font-size:10px;font-weight:500">' + marginPct + '%</div></td>' +
+      '<td><label class="switch"><input type="checkbox" ' + (p.is_visible ? 'checked' : '') + ' onchange="togglePlan(' + p.id + ', \'is_visible\', this.checked)"><span class="slider"></span></label></td>' +
+      '<td>' + (p.upstream_available ? '<span class="pill ok">in stock</span>' : '<span class="pill warn">no stock</span>') + '</td>' +
+      '<td><button class="btn btn-sm" onclick="quickPrice(' + p.id + ')">Apply markup</button></td>' +
+    '</tr>';
+  }).join('');
+}
+
+async function togglePlan(id, field, value) {
+  const patch = {}; patch[field] = value;
+  try {
+    const r = await api('/api/v1/reseller/admin/plans/' + id, { method: 'PUT', body: patch });
+    const idx = PLANS.findIndex(function (p) { return p.id === id; });
+    if (idx >= 0) PLANS[idx] = r.plan;
+    toast('Plan updated', 'success');
+    fillAdminOrderPlans();
+  } catch (e) { toast(e.message, 'error'); loadPlans(); }
+}
+
+async function setPlanPrice(id, field, euroValue) {
+  const cents = Math.round(Number(euroValue) * 100);
+  if (!Number.isFinite(cents) || cents < 0) { toast('Invalid price', 'error'); loadPlans(); return; }
+  const patch = {}; patch[field] = cents;
+  try {
+    const r = await api('/api/v1/reseller/admin/plans/' + id, { method: 'PUT', body: patch });
+    const idx = PLANS.findIndex(function (p) { return p.id === id; });
+    if (idx >= 0) PLANS[idx] = r.plan;
+    renderPlans();
+    toast('Price saved', 'success');
+  } catch (e) { toast(e.message, 'error'); loadPlans(); }
+}
+
+async function quickPrice(id) {
+  const p = PLANS.find(function (x) { return x.id === id; });
+  if (!p) return;
+  const cfg = await api('/api/v1/reseller/admin/config').catch(function () { return null; });
+  const markup = cfg ? cfg.defaultMarkupPercent : 20;
+  const retail = Math.max(p.cost_cents, Math.round(Math.round(p.cost_cents * (1 + markup / 100)) / 50) * 50);
+  await api('/api/v1/reseller/admin/plans/' + id, {
+    method: 'PUT', body: { retail_cents: retail, retail_renew_cents: retail },
+  });
+  toast('Retail set to ' + money(retail) + ' (cost + ' + markup + '%)', 'success');
+  loadPlans();
+}
+
+function renderOs() {
+  const body = document.getElementById('osRows');
+  if (!OS_IMAGES.length) {
+    body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:18px">No OS images synced yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = OS_IMAGES.map(function (o) {
+    return '<tr>' +
+      '<td class="mono">' + esc(o.upstream_os_id) + '</td>' +
+      '<td><strong>' + esc(o.display_name) + '</strong></td>' +
+      '<td>' + esc(o.family) + '</td>' +
+      '<td>' + (o.is_windows ? '<span class="pill info">yes</span>' : '<span class="pill off">no</span>') + '</td>' +
+      '<td>' + (o.min_disk_gb ? o.min_disk_gb + ' GB' : '—') + '</td>' +
+      '<td>' + o.sort_order + '</td>' +
+      '<td>' + (o.is_enabled ? '<span class="pill ok">enabled</span>' : '<span class="pill off">hidden</span>') + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+// ------------------------- custom configuration plan -----------------------
+
+async function openConfigPlan() {
+  document.getElementById('cfgPlanOverlay').classList.add('open');
+  document.getElementById('cpQuote').innerHTML = 'Loading configurator…';
+  try {
+    const r = await api('/api/v1/reseller/admin/configurator');
+    const list = r.configurator || [];
+    const sel = document.getElementById('cpCpu');
+    sel.innerHTML = list.length
+      ? list.map(function (c) { return '<option value="' + esc(c.cpu) + '">' + esc(c.cpu) + (c.available ? '' : ' (unavailable)') + '</option>'; }).join('')
+      : '<option value="">No configurator CPUs available</option>';
+    window.__cfgList = list;
+    loadConfigurator();
+  } catch (e) {
+    document.getElementById('cpQuote').innerHTML = '<span style="color:#F87171">' + esc(e.message) + '</span>';
+  }
+}
+
+function loadConfigurator() {
+  const cpu = document.getElementById('cpCpu').value;
+  const cfg = (window.__cfgList || []).find(function (c) { return c.cpu === cpu; });
+  const box = document.getElementById('cfgPlanLimits');
+  if (!cfg) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  const l = cfg.limits;
+  box.innerHTML = '<strong>' + esc(cpu) + '</strong> limits — cores ' + l.cores.min + '–' + l.cores.max + ' (step ' + l.cores.step + '), ' +
+    'RAM ' + l.memory.min + '–' + l.memory.max + ' GB, disk ' + l.disk.min + '–' + l.disk.max + ' GB, ' +
+    'IPv4 ' + l.ipv4.min + '–' + l.ipv4.max + ', IPv6 ' + l.ipv6.min + '–' + l.ipv6.max + '. ' +
+    'Connection ' + cfg.connection + ' Gbit/s, duration ' + cfg.duration + ' month(s).' +
+    (cfg.available ? '' : ' <span style="color:#F87171">Currently not orderable via API.</span>');
+  document.getElementById('cpCores').min = l.cores.min;
+  document.getElementById('cpCores').max = l.cores.max;
+  document.getElementById('cpCores').step = l.cores.step;
+  document.getElementById('cpMemory').min = l.memory.min;
+  document.getElementById('cpMemory').max = l.memory.max;
+  document.getElementById('cpDisk').min = l.disk.min;
+  document.getElementById('cpDisk').max = l.disk.max;
+  document.getElementById('cpDisk').step = l.disk.step;
+  priceConfig();
+}
+
+let priceTimer = null;
+function priceConfig() {
+  clearTimeout(priceTimer);
+  priceTimer = setTimeout(doPriceConfig, 420);
+}
+async function doPriceConfig() {
+  const cpu = document.getElementById('cpCpu').value;
+  if (!cpu) return;
+  const box = document.getElementById('cpQuote');
+  box.className = 'alert alert-info';
+  box.textContent = 'Pricing…';
+  const markup = document.getElementById('cpMarkup').value;
+  try {
+    const q = await api('/api/v1/reseller/admin/configurator/price?' + new URLSearchParams({
+      cpu: cpu,
+      cores: document.getElementById('cpCores').value,
+      memory: document.getElementById('cpMemory').value,
+      disk: document.getElementById('cpDisk').value,
+      ipv4: document.getElementById('cpIpv4').value,
+      ipv6: document.getElementById('cpIpv6').value,
+      markup: markup,
+    }));
+    box.innerHTML = 'Your cost <strong>' + money(q.costCents) + '</strong> · retail <strong>' + money(q.retailCents) + '</strong>' +
+      ' · margin <strong style="color:#10B981">' + money(q.retailCents - q.costCents) + '</strong>' +
+      (q.upstream && q.upstream.available === false ? ' · <span style="color:#F59E0B">not available upstream</span>' : '');
+  } catch (e) {
+    box.className = 'alert alert-error';
+    box.textContent = e.message;
+  }
+}
+
+async function createConfigPlan() {
+  const payload = {
+    cpu: document.getElementById('cpCpu').value,
+    cores: Number(document.getElementById('cpCores').value),
+    memory: Number(document.getElementById('cpMemory').value),
+    disk: Number(document.getElementById('cpDisk').value),
+    ipv4: Number(document.getElementById('cpIpv4').value),
+    ipv6: Number(document.getElementById('cpIpv6').value),
+    markupPercent: document.getElementById('cpMarkup').value === '' ? '' : Number(document.getElementById('cpMarkup').value),
+    setupCents: Math.round(Number(document.getElementById('cpSetup').value || 0) * 100),
+    displayName: document.getElementById('cpName').value.trim(),
+    description: document.getElementById('cpDesc').value.trim(),
+    enable: true,
+  };
+  try {
+    await api('/api/v1/reseller/admin/plans/config', { method: 'POST', body: payload });
+    document.getElementById('cfgPlanOverlay').classList.remove('open');
+    toast('Custom plan created and enabled', 'success');
+    loadPlans();
+    loadStatus(false);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// --------------------------------- orders ----------------------------------
+
+async function loadOrders() {
+  const status = document.getElementById('orderFilter').value;
+  try {
+    const r = await api('/api/v1/reseller/admin/orders?limit=200' + (status ? '&status=' + encodeURIComponent(status) : ''));
+    ORDERS.length = 0;
+    (r.orders || []).forEach(function (o) { ORDERS.push(o); });
+    renderOrders();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function renderOrders() {
+  const body = document.getElementById('orderRows');
+  if (!ORDERS.length) {
+    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:22px">No orders yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = ORDERS.map(function (o) {
+    const retryable = o.status === 'pending' || o.status === 'failed';
+    return '<tr>' +
+      '<td class="mono">' + esc(o.order_ref) + '</td>' +
+      '<td>' + esc(o.customer_username || ('#' + o.user_id)) + '</td>' +
+      '<td><strong>' + esc(o.server_name || '—') + '</strong><div style="font-size:10px;color:var(--text-muted)">' + esc(o.os_id || '') + '</div></td>' +
+      '<td>' + esc(o.plan_name || (o.cpu_family ? o.cpu_family + ' ' + o.cores + 'c/' + o.memory_gb + 'G/' + o.disk_gb + 'G' : '—')) + '</td>' +
+      '<td><span class="pill ' + esc(o.status) + '">' + esc(o.status) + '</span>' +
+        (o.error_code ? '<div style="font-size:10px;color:#F87171;margin-top:3px">' + esc(o.error_code) + '</div>' : '') + '</td>' +
+      '<td class="mono">' + money(o.charged_cents) + '</td>' +
+      '<td class="mono">' + money(o.upstream_price_cents === null ? o.cost_cents : o.upstream_price_cents) + '</td>' +
+      '<td class="mono" style="font-size:10px">' + (o.upstream_product_id ? esc(o.upstream_product_id).slice(0, 13) + '…' : '—') + '</td>' +
+      '<td style="font-size:11px">' + esc((o.created_at || '').slice(0, 16)) + '</td>' +
+      '<td style="white-space:nowrap">' +
+        (o.error_message ? '<button class="btn btn-sm" title="' + esc(o.error_message) + '" onclick="alert(decodeURIComponent(\'' + encodeURIComponent(o.error_message) + '\'))">why</button> ' : '') +
+        (retryable ? '<button class="btn btn-sm btn-primary" onclick="retryOrder(' + o.id + ')">retry</button> ' : '') +
+        (o.status === 'pending' || o.status === 'failed' ? '<button class="btn btn-sm btn-danger" onclick="cancelOrder(' + o.id + ')">cancel</button> ' : '') +
+        (o.upstream_product_id ? '<a class="btn btn-sm" href="/admin/reseller" onclick="return false;" title="' + esc(o.upstream_product_id) + '">upstream</a>' : '') +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+async function retryOrder(id) {
+  try {
+    toast('Retrying order…');
+    const r = await api('/api/v1/reseller/admin/orders/' + id + '/retry', { method: 'POST' });
+    toast('Order status: ' + r.order.status, r.order.status === 'provisioned' ? 'success' : 'info');
+    loadOrders(); loadStatus(false); loadServers();
+  } catch (e) { toast(e.message, 'error'); loadOrders(); }
+}
+
+async function cancelOrder(id) {
+  if (!confirm('Cancel this queued order? Nothing already provisioned upstream is deleted.')) return;
+  try {
+    await api('/api/v1/reseller/admin/orders/' + id + '/cancel', { method: 'POST' });
+    toast('Order cancelled', 'success');
+    loadOrders();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function fillAdminOrderPlans() {
+  const sel = document.getElementById('aoPlan');
+  const enabled = PLANS.filter(function (p) { return p.is_enabled; });
+  sel.innerHTML = enabled.length
+    ? enabled.map(function (p) {
+        return '<option value="' + p.id + '" data-cents="' + p.retail_cents + '">' +
+          esc(p.display_name) + ' — ' + p.cores + ' vCPU / ' + p.memory_gb + ' GB / ' + p.disk_gb + ' GB — ' + money(p.retail_cents) + '</option>';
+      }).join('')
+    : '<option value="">No enabled plans — sync and enable plans first</option>';
+  aoPrice();
+}
+function aoPrice() {
+  const sel = document.getElementById('aoPlan');
+  const opt = sel.options[sel.selectedIndex];
+  const box = document.getElementById('aoResult');
+  box.className = 'alert alert-info';
+  box.textContent = opt && opt.dataset.cents ? 'This will charge ' + money(opt.dataset.cents) + ' according to the billing mode selected.' : '';
+}
+
+function openAdminOrder() {
+  const u = document.getElementById('aoUser');
+  u.innerHTML = USERS.map(function (x) {
+    return '<option value="' + x.id + '">' + esc(x.username) + (x.email ? ' (' + esc(x.email) + ')' : '') + ' · ' + esc(x.role) + '</option>';
+  }).join('');
+  const os = document.getElementById('aoOs');
+  os.innerHTML = OS_IMAGES.filter(function (o) { return o.is_enabled; }).map(function (o) {
+    return '<option value="' + esc(o.upstream_os_id) + '">' + esc(o.display_name) + '</option>';
+  }).join('');
+  fillAdminOrderPlans();
+  document.getElementById('aoResult').innerHTML = '';
+  document.getElementById('adminOrderOverlay').classList.add('open');
+}
+
+async function submitAdminOrder() {
+  const btn = document.getElementById('aoSubmit');
+  const planId = document.getElementById('aoPlan').value;
+  if (!planId) { toast('Select a plan first.', 'error'); return; }
+  btn.disabled = true; btn.textContent = 'Provisioning…';
+  const box = document.getElementById('aoResult');
+  box.innerHTML = '';
+  try {
+    const r = await api('/api/v1/reseller/admin/orders', {
+      method: 'POST',
+      body: {
+        userId: Number(document.getElementById('aoUser').value),
+        planId: Number(planId),
+        os: document.getElementById('aoOs').value,
+        name: document.getElementById('aoName').value.trim() || null,
+        hostname: document.getElementById('aoHostname').value.trim() || null,
+        paymentMode: document.getElementById('aoPayment').value,
+        autoRenew: document.getElementById('aoAutoRenew').value === '1',
+        notes: document.getElementById('aoNotes').value.trim() || null,
+      },
+    });
+    const o = r.order || {};
+    box.className = 'alert alert-success';
+    box.innerHTML = 'Order <strong>' + esc(o.orderRef) + '</strong> — status <strong>' + esc(o.status) + '</strong>.' +
+      (o.primaryIpv4 ? ' IPv4 <strong>' + esc(o.primaryIpv4) + '</strong>.' : ' Building; IPs appear within minutes.') +
+      (o.credentials ? '<br>Login: <strong>' + esc(o.credentials.username) + ' / ' + esc(o.credentials.password) + '</strong>' : '');
+    toast('Order placed', 'success');
+    loadOrders(); loadServers(); loadStatus(false);
+  } catch (e) {
+    box.className = 'alert alert-error';
+    box.textContent = e.message;
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Provision now';
+  }
+}
+
+// --------------------------------- fleet -----------------------------------
+
+async function loadServers() {
+  try {
+    const r = await api('/api/v1/reseller/admin/servers?limit=500');
+    SERVERS.length = 0;
+    (r.servers || []).forEach(function (s) { SERVERS.push(s); });
+    renderServers();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function renderServers() {
+  const q = (document.getElementById('fleetFilter').value || '').toLowerCase();
+  const ownerName = function (id) {
+    const u = USERS.find(function (x) { return x.id === id; });
+    return u ? u.username : ('#' + id);
+  };
+  const rows = SERVERS.filter(function (s) {
+    if (!q) return true;
+    return (s.name + ' ' + (s.primaryIpv4 || '') + ' ' + (s.upstreamProductId || '') + ' ' + ownerName(s.userId)).toLowerCase().includes(q);
+  });
+  const body = document.getElementById('serverRows');
+  const marginTotal = SERVERS.reduce(function (a, s) { return a + ((s.retailCents || 0) - (s.costCents || 0)); }, 0);
+  document.getElementById('fleetNote').textContent = SERVERS.length + ' servers · monthly margin ' + money(marginTotal);
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:22px">No servers provisioned yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(function (s) {
+    const margin = (s.retailCents || 0) - (s.costCents || 0);
+    const stCls = s.suspended ? 'suspended' : (['install', 'reinstall', 'pending'].includes(s.state) ? 'install' : (s.powerStatus === 'running' ? 'running' : 'stopped'));
+    const stLabel = s.suspended ? 'suspended' : (s.powerStatus && s.powerStatus !== 'unknown' ? s.state + '/' + s.powerStatus : s.state);
+    return '<tr>' +
+      '<td><strong>' + esc(s.name) + '</strong><div style="font-size:10px;color:var(--text-muted)">' + esc(s.cpuLabel || s.cpuFamily || '') + ' · ' + esc(s.osLabel || '') + '</div></td>' +
+      '<td>' + esc(ownerName(s.userId)) + '</td>' +
+      '<td>' + s.cores + ' vCPU / ' + s.memoryGb + ' GB / ' + s.diskGb + ' GB</td>' +
+      '<td class="mono">' + esc(s.primaryIpv4 || '—') + (s.primaryIpv6 ? '<div style="font-size:10px">' + esc(s.primaryIpv6) + '</div>' : '') + '</td>' +
+      '<td><span class="pill ' + stCls + '">' + esc(stLabel) + '</span></td>' +
+      '<td class="mono">' + money(s.retailCents) + '</td>' +
+      '<td class="mono">' + money(s.costCents) + '</td>' +
+      '<td class="mono" style="color:' + (margin >= 0 ? '#10B981' : '#F87171') + '">' + money(margin) + '</td>' +
+      '<td style="font-size:11px">' + (s.expiresAt ? esc(s.expiresAt.slice(0, 10)) : '—') + (s.autoRenew ? ' <span class="pill ok">auto</span>' : '') + '</td>' +
+      '<td style="white-space:nowrap">' +
+        '<a class="btn btn-sm" href="/cloud/' + s.id + '">open</a> ' +
+        '<button class="btn btn-sm" onclick="adminRenew(' + s.id + ')">renew</button> ' +
+        (s.suspended
+          ? '<button class="btn btn-sm" onclick="setSuspend(' + s.id + ', false)">unsuspend</button>'
+          : '<button class="btn btn-sm btn-danger" onclick="setSuspend(' + s.id + ', true)">suspend</button>') +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+async function adminRenew(id) {
+  if (!confirm('Renew this server upstream now? The customer wallet is charged when the server bills from the wallet.')) return;
+  try {
+    const r = await api('/api/v1/reseller/admin/servers/' + id + '/renew', { method: 'POST' });
+    toast('Renewed — charged ' + money(r.chargedCents) + ', cost ' + money(r.costCents), 'success');
+    loadServers(); loadStatus(false);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function setSuspend(id, suspend) {
+  let reason = null;
+  if (suspend) {
+    reason = prompt('Reason shown to the customer:');
+    if (reason === null) return;
+  }
+  try {
+    await api('/api/v1/reseller/admin/servers/' + id + (suspend ? '/suspend' : '/unsuspend'), {
+      method: 'POST', body: { suspend: suspend, reason: reason },
+    });
+    toast(suspend ? 'Server suspended' : 'Server reactivated', 'success');
+    loadServers();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// -------------------------------- wallets ----------------------------------
+
+function renderWallets() {
+  const bal = {};
+  WALLETS.forEach(function (w) { bal[w.user_id] = w.balance_cents; });
+  const counts = {};
+  SERVERS.forEach(function (s) { counts[s.userId] = (counts[s.userId] || 0) + 1; });
+  const body = document.getElementById('walletRows');
+  body.innerHTML = USERS.map(function (u) {
+    const b = bal[u.id] || 0;
+    return '<tr>' +
+      '<td><strong>' + esc(u.username) + '</strong></td>' +
+      '<td>' + esc(u.email || '—') + '</td>' +
+      '<td><span class="pill ' + (u.role === 'admin' ? 'info' : 'off') + '">' + esc(u.role) + '</span></td>' +
+      '<td style="color:' + (b >= 0 ? '#10B981' : '#F87171') + ';font-weight:700">' + money(b) + '</td>' +
+      '<td>' + (counts[u.id] || 0) + '</td>' +
+      '<td><button class="btn btn-sm" onclick="openWallet(' + u.id + ')">Manage credit</button></td>' +
+    '</tr>';
+  }).join('');
+}
+
+async function openWallet(userId) {
+  walletUserId = userId;
+  const u = USERS.find(function (x) { return x.id === userId; });
+  document.getElementById('wTitle').textContent = 'Credit — ' + (u ? u.username : '#' + userId);
+  document.getElementById('wSubtitle').textContent = 'Positive amounts add credit, negative amounts withdraw it. Every entry is written to an auditable ledger.';
+  document.getElementById('wAmount').value = '';
+  document.getElementById('wDesc').value = '';
+  document.getElementById('wLedger').innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Loading ledger…</div>';
+  document.getElementById('walletOverlay').classList.add('open');
+  try {
+    const r = await api('/api/v1/reseller/admin/wallet/' + userId);
+    document.getElementById('wSubtitle').innerHTML = 'Current balance: <strong style="color:#10B981">' + money(r.balanceCents) + '</strong>';
+    const rows = (r.entries || []).slice(0, 25).map(function (e) {
+      return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border-subtle)">' +
+        '<span style="color:var(--text-muted)">' + esc((e.created_at || '').slice(0, 16)) + ' · ' + esc(e.kind) + (e.reference ? ' · ' + esc(e.reference) : '') + '</span>' +
+        '<span style="color:' + (e.delta_cents >= 0 ? '#10B981' : '#F87171') + ';font-weight:700">' + (e.delta_cents >= 0 ? '+' : '') + money(e.delta_cents) + '</span>' +
+      '</div>';
+    }).join('');
+    document.getElementById('wLedger').innerHTML = rows || '<div style="font-size:12px;color:var(--text-muted)">No ledger entries yet.</div>';
+  } catch (e) {
+    document.getElementById('wLedger').innerHTML = '<div class="alert alert-error">' + esc(e.message) + '</div>';
+  }
+}
+
+async function submitWallet() {
+  const euro = Number(document.getElementById('wAmount').value);
+  if (!Number.isFinite(euro) || euro === 0) { toast('Enter a non-zero amount in EUR.', 'error'); return; }
+  try {
+    const r = await api('/api/v1/reseller/admin/wallet/' + walletUserId + '/adjust', {
+      method: 'POST',
+      body: {
+        amountCents: Math.round(euro * 100),
+        kind: document.getElementById('wKind').value,
+        description: document.getElementById('wDesc').value.trim() || undefined,
+      },
+    });
+    toast('New balance ' + money(r.balanceCents), 'success');
+    const idx = WALLETS.findIndex(function (w) { return w.user_id === walletUserId; });
+    if (idx >= 0) WALLETS[idx].balance_cents = r.balanceCents;
+    else WALLETS.push({ user_id: walletUserId, balance_cents: r.balanceCents });
+    renderWallets();
+    openWallet(walletUserId);
+    loadStatus(false);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// --------------------------------- logs ------------------------------------
+
+async function loadLogs() {
+  const box = document.getElementById('logBox');
+  box.innerHTML = '<div style="padding:14px;color:var(--text-muted);font-size:12px">Loading…</div>';
+  try {
+    const r = await api('/api/v1/reseller/admin/logs?limit=120');
+    const logs = r.logs || [];
+    if (!logs.length) {
+      box.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text-muted);font-size:12px">No upstream calls recorded yet.</div>';
+      return;
+    }
+    box.innerHTML = logs.map(function (l) {
+      const ok = l.state === 'success';
+      const detail = l.error_code || (l.status_code || '');
+      return '<div class="log-line" title="' + esc((l.request_body || '') + '\n' + (l.response_body || '')) + '">' +
+        '<span>' + esc((l.created_at || '').slice(5, 19)) + '</span>' +
+        '<span class="m">' + esc(l.method) + '</span>' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(l.endpoint) + '</span>' +
+        '<span class="pill ' + (ok ? 'ok' : 'err') + '">' + esc(detail) + '</span>' +
+        '<span style="color:var(--text-muted)">' + (l.duration_ms || 0) + ' ms</span>' +
+      '</div>';
+    }).join('');
+  } catch (e) {
+    box.innerHTML = '<div class="alert alert-error">' + esc(e.message) + '</div>';
+  }
+}
+
+// --------------------------------- init ------------------------------------
+
+renderStats();
+renderConfig();
+renderPlans();
+renderOs();
+renderOrders();
+renderServers();
+renderWallets();
+loadStatus(true);
+setInterval(function () { loadStatus(false); }, 60000);
+</script>
+</body>
+</html>

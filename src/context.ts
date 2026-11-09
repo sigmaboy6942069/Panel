@@ -15,6 +15,7 @@ import { NetworkManager } from './services/network/NetworkManager';
 import { BackupSnapshotManager } from './services/backup/BackupSnapshotManager';
 import { MigrationManager } from './services/migration/MigrationManager';
 import { MonitoringService } from './services/monitoring/MonitoringService';
+import { ResellerService } from './services/reseller/ResellerService';
 import { normalizeRole } from './security/middleware';
 
 export interface HkvmRuntimeContext {
@@ -29,6 +30,8 @@ export interface HkvmRuntimeContext {
   backupManager: BackupSnapshotManager;
   migrationManager: MigrationManager;
   monitoringService: MonitoringService;
+  /** Upstream reseller integration (Bukkit-Hosting KVM provisioning). */
+  reseller: ResellerService;
 }
 
 let activeContext: HkvmRuntimeContext | null = null;
@@ -84,12 +87,15 @@ export async function initializeUnifiedHkvmRuntime(
     networkManager
   );
   const monitoringService = new MonitoringService(db, nodeManager, instanceManager);
+  const reseller = new ResellerService(db);
 
   if (
     process.env.TGVPANEL_DISABLE_BACKGROUND_POLLER !== 'true' &&
     process.env.HKVM_DISABLE_BACKGROUND_POLLER !== 'true'
   ) {
     monitoringService.startBackgroundLoop(60_000);
+    // Drains queued upstream orders and reconciles cloud server states/IPs.
+    reseller.startBackgroundJobs();
     lxcAdapter.healLocalContainersNetworking().catch((err) => {
       console.warn('[LXC Network Self-Heal]', err?.message || err);
     });
@@ -107,6 +113,7 @@ export async function initializeUnifiedHkvmRuntime(
     backupManager,
     migrationManager,
     monitoringService,
+    reseller,
   };
 
   return activeContext;
