@@ -1,0 +1,175 @@
+================================================================================
+  TGVPANEL — WHERE TO PUT YOUR RESELLER API KEY
+  (Bukkit-Hosting upstream integration)
+================================================================================
+
+Your API key looks like:   bkkt_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+You have TWO ways to add it. Use whichever you prefer — Method A (the admin
+web page) is the easiest and the most secure. You only need to do ONE of them.
+
+The panel runs fine WITHOUT a key. Nothing is sold and no upstream calls happen
+until a key is added and the integration is enabled.
+
+
+--------------------------------------------------------------------------------
+METHOD A — Add it in the Admin Panel  (RECOMMENDED)
+--------------------------------------------------------------------------------
+
+  1. Open your panel in a browser and sign in with your ADMIN account.
+
+  2. In the left admin sidebar, click:
+
+         Reseller & Cloud
+
+     (direct web address:   https://YOUR-PANEL-DOMAIN/admin/reseller )
+
+  3. Click the "Provider" tab (it is the first tab at the top).
+
+  4. Find the field labelled:
+
+         Reseller API key
+
+     Paste your key (bkkt_...) into that box.
+
+     NOTE: The box is a password field, so it shows dots. That is normal.
+           After you save, the panel only ever shows it again as a short hint
+           like "bkkt_d...abcd" — the full key is stored encrypted and is
+           never displayed or sent back to the browser.
+
+  5. (Optional) Check the "API base URL" field. The default is correct for
+     Bukkit-Hosting:
+
+         https://bukkit-hosting.eu/api/v2
+
+     Leave it as-is unless your provider told you otherwise.
+
+  6. Click the button:
+
+         Save connection
+
+  7. Click the button:
+
+         Test connection
+
+     If the key is good you will see your upstream account name, your reseller
+     balance and your reseller tier in the "Upstream account" box.
+     If it fails, you will see a clear error (e.g. "unauthorized" = wrong key).
+
+  8. Still on the Provider tab, in the "Selling" box, turn ON these switches:
+
+         [x] Integration enabled      <- master switch, MUST be on
+         [x] Storefront open          <- lets your customers order from /store
+
+     Then click "Save selling settings".
+
+  9. Click the "Catalogue & pricing" tab, then click:
+
+         Sync from provider
+
+     This pulls in all the plans (AMD EPYC, Ryzen 9, Intel Xeon, etc.) and the
+     operating systems. NEW plans arrive DISABLED on purpose.
+
+ 10. In the plan table, set your retail price for each plan you want to sell,
+     then flip the "On" toggle for those plans to enable them.
+     (Tip: the "Apply markup" button sets retail = your cost + your default
+      markup percentage in one click.)
+
+  >>> DONE. Your storefront at  https://YOUR-PANEL-DOMAIN/store  is now live
+      and customers can order — servers are provisioned onto their account
+      instantly.
+
+
+--------------------------------------------------------------------------------
+METHOD B — Add it in the .env file  (headless / server-side)
+--------------------------------------------------------------------------------
+
+Use this if you prefer editing files on the server instead of the web page.
+
+  1. On the server, open the panel folder and edit the file:
+
+         .env
+
+     (If there is no .env yet, copy the example first:
+         cp .env.example .env )
+
+  2. Find this line near the bottom (under "Upstream Reseller Integration"):
+
+         RESELLER_API_KEY=
+
+     and put your key after the equals sign, no quotes and no spaces:
+
+         RESELLER_API_KEY=bkkt_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  3. Save the file.
+
+  4. Restart the panel so it picks up the new value, for example:
+
+         npm start
+     (or restart your systemd service / pm2 / docker container, however you
+      normally run the panel)
+
+  5. You still need to enable the integration + sync the catalogue. The quickest
+     way is Method A steps 8-10 in the admin page. (The .env key is used
+     automatically; you do not need to re-type it in the web page.)
+
+  IMPORTANT: A key saved through the admin web page (Method A) takes PRIORITY
+  over the .env key. So if you ever set it in both places, the web page one wins.
+
+  SECURITY: Never commit your .env file or share it. It is already in
+  .gitignore, so Git will not upload it.
+
+
+--------------------------------------------------------------------------------
+WHERE THE KEY IS ACTUALLY STORED (good to know)
+--------------------------------------------------------------------------------
+
+  * Method A: encrypted with AES-256-GCM inside the panel database
+              (setting "reseller_api_key_enc"), using the secret in the file
+              ".tgvpanel-secret". Only a hint is ever shown in the UI.
+
+  * Method B: plain text in your ".env" file on the server (kept out of Git).
+
+  Either way the key is only used server-side to talk to your provider. It is
+  never shown to customers and never written to the API log (the log redacts it).
+
+
+--------------------------------------------------------------------------------
+HOW TO CHECK IT WORKED
+--------------------------------------------------------------------------------
+
+  * Admin > Reseller & Cloud > "Provider" tab > "Test connection"
+        -> shows your upstream account + balance.
+
+  * The top of the admin page shows a green "Upstream balance" card when the
+    provider is reachable, or a red banner with the reason if not.
+
+  * Visit  /store  while logged in — you should see your enabled plans.
+
+  * If something is off, open the "Upstream API log" tab — it shows every call
+    to the provider with its status and error code (secrets redacted).
+
+
+--------------------------------------------------------------------------------
+REMOVING / CHANGING THE KEY LATER
+--------------------------------------------------------------------------------
+
+  * To change it: just paste the new key in the "Reseller API key" box and click
+    "Save connection" again (or edit .env and restart).
+
+  * To remove it: on the Provider tab click "Remove API key". The integration
+    stops working until a new key is added (your existing customers' servers are
+    unaffected — they keep running).
+
+
+--------------------------------------------------------------------------------
+QUICK ANSWER
+--------------------------------------------------------------------------------
+
+  >>> Easiest:  Admin sidebar  ->  "Reseller & Cloud"  ->  "Provider" tab
+                ->  paste key in "Reseller API key"  ->  "Save connection"
+                ->  "Test connection"  ->  enable "Integration enabled"
+                ->  "Catalogue & pricing" tab  ->  "Sync from provider".
+
+  Full details: docs/RESELLER_INTEGRATION.md
+================================================================================
