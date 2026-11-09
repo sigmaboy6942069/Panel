@@ -98,7 +98,7 @@ export declare class ResellerApiClient {
     lastRateLimit: UpstreamRateLimitInfo;
     constructor(config: ResellerClientConfig);
     isConfigured(): boolean;
-    /** Redacted key hint (`bkkt_…abcd`) safe to render in the admin UI. */
+    /** Redacted key hint (first and last characters only) safe to render in the admin UI. */
     keyHint(): string;
     private assertConfigured;
     private buildUrl;

@@ -161,7 +161,7 @@
             <div class="f-grid">
               <div class="f full">
                 <label for="cfgApiKey">Reseller API key</label>
-                <input id="cfgApiKey" type="password" autocomplete="off" placeholder="<%= status && status.keyHint ? 'stored: ' + status.keyHint : 'bkkt_…' %>">
+                <input id="cfgApiKey" type="password" autocomplete="off" placeholder="<%= status && status.keyHint ? 'stored: ' + status.keyHint : 'your API key' %>">
                 <div class="hint">
                   Stored AES-256-GCM encrypted in the panel vault — never in plaintext, never sent to the browser again.
                   Leave empty to keep the current key. You can also set <code>RESELLER_API_KEY</code> in <code>.env</code>.

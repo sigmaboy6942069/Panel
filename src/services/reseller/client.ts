@@ -336,7 +336,7 @@ export class ResellerApiClient {
     return this.apiKey.length > 0;
   }
 
-  /** Redacted key hint (`bkkt_…abcd`) safe to render in the admin UI. */
+  /** Redacted key hint (first and last characters only) safe to render in the admin UI. */
   public keyHint(): string {
     if (!this.apiKey) return '';
     const tail = this.apiKey.slice(-4);

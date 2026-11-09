@@ -105,10 +105,11 @@ Key settings (all editable in the admin console):
 You can add the key at any time — the panel runs fine without it.
 
 **Option A — Admin console (recommended).** The key is encrypted at rest and
-only ever shown again as a hint like `bkkt_d…abcd`.
+only ever shown again as a short, redacted hint (just the first few and last
+few characters).
 
 1. Sign in as an **admin** and open **Admin → Reseller & Cloud** (`/admin/reseller`).
-2. On the **Provider** tab, paste your reseller API key (`bkkt_…`) and click
+2. On the **Provider** tab, paste your reseller API key and click
    **Save connection**.
 3. Click **Test connection** — you should see the upstream account, its balance
    and your reseller tier.
@@ -117,8 +118,9 @@ only ever shown again as a hint like `bkkt_d…abcd`.
    New plans arrive **disabled** — set your retail prices, then enable the ones
    you want to sell.
 
-**Option B — `.env` (headless).** Set `RESELLER_API_KEY=bkkt_…` and restart. A
-key stored through the admin UI takes precedence over the env variable.
+**Option B — `.env` (headless).** Set `RESELLER_API_KEY=your_api_key_here` and
+restart. A key stored through the admin UI takes precedence over the env
+variable.
 
 > The API key is a secret. Never commit it. `.env` and the secret vault file
 > `.tgvpanel-secret` are already git-ignored.
@@ -130,7 +132,7 @@ key stored through the admin UI takes precedence over the env variable.
 All optional; the admin console values win where both exist.
 
 ```dotenv
-# Reseller API key (bkkt_…). DB value (set via UI) takes precedence.
+# Reseller API key. DB value (set via UI) takes precedence.
 RESELLER_API_KEY=
 # Provider API v2 root (no trailing slash).
 RESELLER_API_BASE_URL=https://bukkit-hosting.eu/api/v2
@@ -429,4 +431,4 @@ TGVPANEL_DISABLE_BACKGROUND_POLLER=true TGVPANEL_DISABLE_RESELLER_POLLER=true no
 ---
 
 *Provider API contract reference: `https://bukkit-hosting.eu/docs`
-(OpenAPI 3.0.3, base `https://bukkit-hosting.eu/api/v2`, `Authorization: Bearer bkkt_…`).*
+(OpenAPI 3.0.3, base `https://bukkit-hosting.eu/api/v2`, `Authorization: Bearer your_api_key_here`).*

@@ -3,7 +3,7 @@
   (Bukkit-Hosting upstream integration)
 ================================================================================
 
-Your API key looks like:   bkkt_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Your API key is the one issued to you by your upstream provider.
 
 You have TWO ways to add it. Use whichever you prefer — Method A (the admin
 web page) is the easiest and the most secure. You only need to do ONE of them.
@@ -30,12 +30,12 @@ METHOD A — Add it in the Admin Panel  (RECOMMENDED)
 
          Reseller API key
 
-     Paste your key (bkkt_...) into that box.
+     Paste your key into that box.
 
      NOTE: The box is a password field, so it shows dots. That is normal.
-           After you save, the panel only ever shows it again as a short hint
-           like "bkkt_d...abcd" — the full key is stored encrypted and is
-           never displayed or sent back to the browser.
+           After you save, the panel only ever shows a short redacted hint
+           (the first few and last few characters) — the full key is stored
+           encrypted and is never displayed or sent back to the browser.
 
   5. (Optional) Check the "API base URL" field. The default is correct for
      Bukkit-Hosting:
@@ -99,7 +99,7 @@ Use this if you prefer editing files on the server instead of the web page.
 
      and put your key after the equals sign, no quotes and no spaces:
 
-         RESELLER_API_KEY=bkkt_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+         RESELLER_API_KEY=your_api_key_here
 
   3. Save the file.
 
