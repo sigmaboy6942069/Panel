@@ -101,16 +101,32 @@ your live data diverging from the repo copy. Do not "fix" it.
 
 ### 3.2 Install the sync script
 
-```bash
-sudo git fetch origin
-sudo git show origin/main:scripts/sync-from-github.sh > /tmp/sync.sh   # if not present yet
-```
-
-Or, once the script is on your branch/main:
+The script ships in the repo at `scripts/sync-from-github.sh`. Give it the
+executable bit:
 
 ```bash
 sudo chmod +x scripts/sync-from-github.sh
 ```
+
+It works from **any** of these locations — it finds the install by asking git,
+not by assuming its own position:
+
+| Where you put it | Works |
+| --- | --- |
+| `scripts/sync-from-github.sh` (repo layout) | ✅ |
+| `./sync.sh` at the repo root | ✅ |
+| `/usr/local/bin/sync` as a symlink | ✅ |
+| Anywhere, with `TGVPANEL_DIR=/opt/tgvpanel` | ✅ |
+
+> **If you get `[FAIL] Not a git checkout: /opt`** you are running an older
+> copy of the script (before this was fixed). Grab the current one:
+>
+> ```bash
+> cd /opt/tgvpanel
+> sudo git fetch origin
+> sudo git show origin/main:scripts/sync-from-github.sh > sync.sh
+> sudo chmod +x sync.sh
+> ```
 
 ### 3.3 Verify prerequisites
 
@@ -307,6 +323,7 @@ sqlite3 data/backups/pre_sync_*.db \
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
+| `Not a git checkout: /opt` | Old script copied to the repo root; it walked up one level | Update the script ([§3.2](#32-install-the-sync-script)), or run `cd /opt/tgvpanel && sudo ./sync.sh main` |
 | `Database backup failed` | No `sqlite3` CLI and no `node:sqlite` | Install `sqlite3`, or use Node 22+ |
 | `Local uncommitted changes to tracked code files` | Someone edited code on the VPS | Commit, or `git stash` those paths |
 | `merge --ff-only` refuses | VPS has local commits | See [§6 fallback](#if-step-5-refuses-to-fast-forward) |
