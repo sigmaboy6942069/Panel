@@ -17,6 +17,7 @@ clear, retryable error instead of crashing.
 1. [How It Works](#1-how-it-works)
 2. [What Gets Installed (migrations v12 & v13)](#2-what-gets-installed-migrations-v12--v13)
 3. [Multiple Upstream Providers](#3-multiple-upstream-providers)
+3b. [Selling Your Own Nodes](#3b-selling-your-own-nodes-own-node-provider)
 4. [Quick Start — Add Your API Key](#4-quick-start--add-your-api-key)
 5. [Environment Variables](#5-environment-variables)
 6. [Selling Model & Money Handling](#6-selling-model--money-handling)
@@ -69,7 +70,7 @@ so they live in their own tables, endpoints and pages.
 
 ---
 
-## 2. What Gets Installed (migrations v12 & v13)
+## 2. What Gets Installed (migrations v12, v13 & v14)
 
 Migration `v012_reseller_upstream_provisioning` runs automatically on the next
 panel start (a pre-migration backup is taken first, as with every migration). It
@@ -223,6 +224,129 @@ GROUP BY p.provider_id;
 SELECT 'plans' AS t, COUNT(*) FROM reseller_plans WHERE provider_id IS NULL
 UNION ALL SELECT 'servers', COUNT(*) FROM cloud_servers WHERE provider_id IS NULL
 UNION ALL SELECT 'orders',  COUNT(*) FROM reseller_orders WHERE provider_id IS NULL;
+```
+
+---
+
+## 3b. Selling Your Own Nodes (own-node provider)
+
+Everything above resells **someone else's** servers. A provider of type `local`
+instead sells capacity from **the nodes you run yourself** — the same KVM/LXC
+machines managed under *Admin → Nodes*. Orders placed against a local provider
+create a real instance on your hardware instead of calling an upstream API.
+
+Both kinds of provider live side by side in the same storefront: a customer sees
+one catalogue and does not need to know whether a given plan is resold or hosted
+by you.
+
+### What a local provider has
+
+| | Upstream provider | Own-node provider (`local`) |
+| --- | --- | --- |
+| Base URL | required | none |
+| API key | required | none |
+| Catalogue source | upstream `GET /kvm/plans` | capacity found on your nodes |
+| Fulfilment | upstream API order | `LXCAdapter.createLxcInstance` / KVM create |
+| Cost per server | upstream price | 0 (you pay for the hardware) |
+| Stock | upstream availability | free space on the node |
+| Power / status | upstream API | your virtualization layer |
+
+### Setting one up
+
+1. Have at least one **online** node under *Admin → Nodes* with a detected
+   engine (KVM and/or LXC) and some free capacity. Nodes in maintenance are
+   skipped.
+2. *Admin → Reseller → Providers → Add provider*.
+3. Set **Where do these servers come from** to
+   **My own nodes (I run KVM/LXC myself)**. The base URL and API key fields
+   disappear — they are not needed.
+4. Save, then click **sync** on that provider. This turns node capacity into
+   `reseller_plans` rows, **disabled by default** so you can set prices first.
+   Nothing is sellable until you enable a plan and give it a retail price.
+5. Optionally use **Discover capacity** in the provider's Settings tab to see
+   what is sellable before syncing.
+
+### What gets sold
+
+Sync offers the standard shape ladder for every engine on every sellable node:
+
+```
+1 vCPU / 2 GB / 20 GB      2 vCPU / 4 GB / 40 GB
+1 vCPU / 4 GB / 40 GB      4 vCPU / 8 GB / 80 GB
+2 vCPU / 2 GB / 20 GB      8 vCPU / 16 GB / 160 GB
+```
+
+Shapes that do not fit in the node's free CPU / RAM / disk are not offered, and
+the `stock` column tracks how many of each shape still fit. When a node fills
+up the plan shows **sold out** instead of failing at checkout.
+
+Plans are identified as `node<id>-<engine>-<cores>c-<ram>g-<disk>g`, so a
+re-sync updates existing plans instead of duplicating them, and re-enabling a
+plan keeps your prices.
+
+### What happens on an order
+
+1. The customer pays from their wallet exactly as for a resold server.
+2. `LocalProvisioningEngine` picks the node the plan is pinned to.
+3. **LXC** plans call `LXCAdapter.createLxcInstance({ provisionOnHost: true })`,
+   which creates the container on the host, assigns an IP and returns the root
+   password.
+4. **KVM** plans go through the panel's own VM pipeline (qcow2 + cloud-init
+   seed + boot), registered at boot as a hook from `app.js`.
+5. The instance is linked back to the order: `cloud_servers.engine`,
+   `node_id`, `instance_ref_id` and `instance_uid` are filled in, so the
+   customer's dashboard can start, stop, restart and inspect the server through
+   the virtualization layer rather than an API.
+
+If provisioning fails, the order is marked `failed` with the real reason and
+**the wallet is refunded** — no charge for a server that was never created.
+Retryable failures (transient) stay `pending` for the poller.
+
+### Requirements on the node
+
+* LXC: `lxc-create`, `lxc-start`, `lxc-info` must be installed, and the node
+  agent must be reachable. A missing LXC install produces a terminal
+  `lxc_provision_failed` order rather than an endless retry.
+* KVM: QEMU, the cloud image referenced by the template, and a free bridge.
+  KVM plans are limited to the templates in the panel's built-in catalogue
+  (`OS_TEMPLATES` in `app.js`) plus anything in `os_templates`; an unknown
+  template is rejected at order time.
+* Both: the node must not be in `maintenance_mode` and must be under its
+  `max_instances` limit.
+
+### Schema (migration v14)
+
+`v014_reseller_own_node_providers` adds:
+
+| Table | Column | Purpose |
+| --- | --- | --- |
+| `cloud_servers` | `engine`, `node_id`, `instance_ref_id`, `instance_uid` | link a sold server to the real instance |
+| `reseller_plans` | `engine`, `node_id`, `lxc_template`, `bridge`, `stock` | how to fulfil, and how many still fit |
+| `reseller_providers` | `base_url` made **nullable** | local providers have no upstream URL |
+
+Indexes `idx_cloud_servers_instance`, `idx_cloud_servers_node` and
+`idx_reseller_plans_engine` support the lookups the order pipeline does.
+
+### API
+
+`GET /api/v1/reseller/admin/providers/local-capacity` returns what your nodes
+can sell right now:
+
+```json
+{
+  "total": 12,
+  "engines": ["kvm", "lxc"],
+  "nodes": [{ "id": 1, "name": "node1" }],
+  "capacity": [
+    {
+      "upstreamPlanId": "node1-lxc-1c-2g-20g",
+      "nodeId": 1, "nodeName": "node1", "engine": "lxc",
+      "cores": 1, "memoryGb": 2, "diskGb": 20,
+      "available": 3, "family": "lxc", "cpuLabel": "LXC Container",
+      "displayName": "node1 Starter — 1 vCPU / 2 GB LXC"
+    }
+  ]
+}
 ```
 
 ---

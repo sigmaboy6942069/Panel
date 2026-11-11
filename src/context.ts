@@ -87,7 +87,9 @@ export async function initializeUnifiedHkvmRuntime(
     networkManager
   );
   const monitoringService = new MonitoringService(db, nodeManager, instanceManager);
-  const reseller = new ResellerService(db);
+  // A local (own-node) provider needs the virtualization layer to create real
+  // instances when a customer orders.
+  const reseller = new ResellerService(db, virtManager);
 
   if (
     process.env.TGVPANEL_DISABLE_BACKGROUND_POLLER !== 'true' &&

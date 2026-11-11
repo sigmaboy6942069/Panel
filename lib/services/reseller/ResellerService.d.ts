@@ -21,6 +21,8 @@
  */
 import { UnifiedDatabase } from '../../db/database';
 import { ResellerApiClient, UpstreamApiError } from './client';
+import { LocalCapacityPlan, LocalProvisioningEngine } from './LocalProvisioningEngine';
+import { VirtualizationManager } from '../virtualization/VirtualizationManager';
 import { CloudServerRow, ResellerOsRow, ResellerPlanRow, ResellerProviderRow, UpstreamAccount, UpstreamFirewall, UpstreamKvmConfigurator, UpstreamKvmConfiguratorPrice, UpstreamKvmNetwork, UpstreamKvmStatistics, UpstreamKvmStatus, UpstreamRateLimitInfo, UpstreamRenewQuote, UpstreamResellerInfo, WalletEntryRow } from './types';
 export declare class ResellerError extends Error {
     readonly statusCode: number;
@@ -286,7 +288,20 @@ export declare class ResellerService {
     private syncTimer;
     private pollRunning;
     private syncRunning;
-    constructor(db: UnifiedDatabase);
+    /** Own-node provisioning; only created when a virtualization layer is wired. */
+    readonly local: LocalProvisioningEngine | null;
+    constructor(db: UnifiedDatabase, virt?: VirtualizationManager);
+    /** True when this provider sells capacity from our own nodes. */
+    isLocalProvider(provider: {
+        provider?: string | null;
+    } | null | undefined): boolean;
+    /**
+     * Returns the own-node engine for a local provider, or throws a clear error
+     * when the panel was started without a virtualization layer.
+     */
+    private requireLocalEngine;
+    /** Live capacity for a local provider, used by the console and sync. */
+    getLocalCapacity(): Promise<LocalCapacityPlan[]>;
     getSettings(): Promise<ResellerSettings>;
     setSetting(key: string, value: string | number | boolean | null): Promise<void>;
     /**
@@ -608,6 +623,11 @@ export declare class ResellerService {
         consoleUrl: string;
     }>;
     serverStatus(serverId: number): Promise<UpstreamKvmStatus>;
+    /**
+     * Live state of an own-node server, read from the virtualization layer and
+     * mirrored into `cloud_servers` so the dashboard stays accurate.
+     */
+    private localServerStatus;
     serverStatistics(serverId: number, period?: 'hour' | 'day' | 'week' | 'month' | 'year'): Promise<UpstreamKvmStatistics>;
     serverNetwork(serverId: number, rdns?: boolean): Promise<UpstreamKvmNetwork>;
     serverFirewall(serverId: number): Promise<UpstreamFirewall>;

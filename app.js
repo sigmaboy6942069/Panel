@@ -5947,6 +5947,153 @@ async function bootstrapHkvmV3() {
 
   v3PrincipalMiddleware = createUnifiedAuthMiddleware(hkvmV3Context.db);
   v3ApiRouter = createApiV1Router(hkvmV3Context);
+  // ---------------------------------------------------------------------
+  // Own-node KVM selling hook.
+  //
+  // A `local` reseller provider sells capacity from nodes we control. Creating
+  // a KVM guest means driving the same qcow2/cloud-init pipeline the admin VM
+  // form uses, so the reseller service is handed a creator rather than
+  // duplicating that logic in TypeScript.
+  // ---------------------------------------------------------------------
+  if (hkvmV3Context.reseller && hkvmV3Context.reseller.local) {
+    hkvmV3Context.reseller.local.setKvmCreateHook(async (spec) => {
+      const {
+        userId, name, cores, memoryMb, diskGb, templateKey, templateLabel, expirationDays,
+      } = spec;
+
+      // Validate the template before creating anything.
+      const builtIn = templateKey && OS_TEMPLATES[templateKey];
+      let template = builtIn || null;
+      let isCloudInit = true;
+      if (!builtIn && templateKey) {
+        template = await new Promise((resolve) => {
+          db.get(`SELECT * FROM os_templates WHERE template_key = ?`, [templateKey], (e, row) =>
+            resolve(e ? null : row)
+          );
+        });
+        if (!template) {
+          throw new Error(
+            `Unknown OS template "${templateKey}". Add it under Admin → Templates first.`
+          );
+        }
+        isCloudInit = template.template_type === 'cloud-init';
+      }
+      if (!template) {
+        throw new Error(
+          'KVM plans must reference an OS template (cloud-init image or installer ISO).'
+        );
+      }
+
+      const sshUser = template.username || 'ubuntu';
+      const plainPassword = require('crypto').randomBytes(16).toString('hex');
+      const vmName = String(name).slice(0, 60);
+
+      // Reuse the same shape the admin creation route writes.
+      const vmId = await new Promise((resolve, reject) => {
+        db.run(
+          `INSERT INTO vms (
+             vm_name, os_type, template_type, hostname, username, password,
+             memory, cpus, cpu_sockets, cpu_cores, cpu_threads, cpu_model,
+             machine_type, board_name, product_name,
+             disk_size, img_file, seed_file, disk_file,
+             status, uptime, node_name,
+             network_type, ssh_port, ssh_port_static, http_port,
+             mac_address, bridge_device, owner_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 1, 'host',
+             'pc', 'Main-Board', 'Virtual Machine',
+             ?, '', '', '',
+             'stopped', 0, 'localhost',
+             'nat', 22, 22, 80,
+             ?, 'vmbr0', ?)`,
+          [
+            vmName, templateKey, isCloudInit ? 'cloud-init' : 'iso-installer',
+            vmName, sshUser, encryptSecret(String(plainPassword)),
+            memoryMb, cores, cores,
+            `${Math.max(5, Number(diskGb))}G`,
+            generateMACAddress(), userId,
+          ],
+          function (err) {
+            if (err) return reject(err);
+            resolve(this.lastID);
+          }
+        );
+      });
+
+      const imgFile = path.join(isCloudInit ? CLOUDVM_DIR : ISO_DIR, `${templateKey}-${vmId}.qcow2`);
+      const diskFile = path.join(VM_DIR, `vm-${vmId}-disk.qcow2`);
+      const seedFile = path.join(VM_DIR, `vm-${vmId}-seed.iso`);
+      await hkvmV3Context.db.run(
+        `UPDATE vms SET img_file = ?, seed_file = ?, disk_file = ? WHERE vm_id = ?`,
+        [imgFile, seedFile, diskFile, vmId]
+      );
+
+      const expiresAt = Number(expirationDays) > 0
+        ? new Date(Date.now() + Number(expirationDays) * 86400000).toISOString()
+        : null;
+
+      // Register in the unified instance registry so the customer's dashboard
+      // and the fleet view both see it.
+      const instance = {
+        uid: `kvm:${vmId}`,
+        engine: 'kvm',
+        refId: vmId,
+        name: vmName,
+        hostname: vmName,
+        ownerId: userId,
+        nodeId: 1,
+        status: 'stopped',
+        suspended: false,
+        osLabel: templateLabel || templateKey,
+        cpuCores: cores,
+        ramMb: memoryMb,
+        swapMb: 0,
+        diskGb: Number(diskGb),
+        primaryIp: null,
+        sharedWith: [],
+        expiresAt,
+        createdAt: new Date().toISOString(),
+        capabilities: hkvmV3Context.virtManager
+          ? hkvmV3Context.virtManager.kvm.getCapabilityProfile()
+          : { engine: 'kvm' },
+      };
+
+      // Build disks + seed and boot the guest asynchronously; the customer sees
+      // "provisioning" until it comes up, exactly like an upstream order.
+      setImmediate(async () => {
+        try {
+          const raw = await hkvmV3Context.db.get(`SELECT * FROM vms WHERE vm_id = ?`, [vmId]);
+          if (!raw) return;
+          if (isCloudInit) {
+            await createCloudInitSeed(vmId, raw);
+          }
+          const started = await startQemuVM(raw);
+          if (started && started.success) {
+            vmProcesses.set(vmId, started.pid);
+            await hkvmV3Context.db.run(
+              `UPDATE vms SET status = 'running', pid = ? WHERE vm_id = ?`,
+              [started.pid, vmId]
+            );
+          }
+        } catch (e) {
+          console.error(`[own-node] VM ${vmId} boot failed:`, e && e.message);
+        }
+      });
+
+      return { instance, rootPassword: plainPassword };
+    });
+    // The built-in KVM image catalogue lives in this file, so hand it to the
+    // reseller engine: only images that can actually boot should be sellable.
+    hkvmV3Context.reseller.local.setKvmTemplateHook(() =>
+      Object.entries(OS_TEMPLATES).map(([key, tpl]) => ({
+        id: key,
+        name: tpl.name || key,
+        family: tpl.type === 'iso-installer' ? 'iso' : 'linux',
+        arch: 'amd64',
+      }))
+    );
+    console.log('[own-node] KVM provisioning hook registered');
+  }
+
   v3WebRouter = createUnifiedWebRouter(hkvmV3Context);
   attachUnifiedWebSockets(server, sessionParser, hkvmV3Context);
   return hkvmV3Context;

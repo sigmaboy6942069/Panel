@@ -305,7 +305,7 @@
             </div>
             <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
               <button class="btn btn-primary" onclick="saveConfig()">Save connection</button>
-              <button class="btn" onclick="testConnection()">Test connection</button>
+              <button class="btn" id="cfgTestBtn" onclick="testConnection()">Test connection</button>
               <button class="btn btn-danger" onclick="clearKey()">Remove API key</button>
             </div>
           </div>
@@ -502,19 +502,29 @@
         <input id="provName" type="text" maxlength="80" placeholder="Bukkit-Hosting EU">
         <div class="hint">Staff-facing label, e.g. the region or account owner.</div>
       </div>
-      <div class="f full">
+      <div class="f full" id="provBaseUrlRow">
         <label for="provBaseUrl">API base URL</label>
         <input id="provBaseUrl" type="text" placeholder="https://bukkit-hosting.eu/api/v2">
         <div class="hint">Provider API v2 root, without a trailing slash.</div>
       </div>
-      <div class="f full">
+      <div class="f full" id="provApiKeyRow">
         <label for="provApiKey">API key <span style="text-transform:none;font-weight:500">(encrypted at rest)</span></label>
         <input id="provApiKey" type="password" autocomplete="off" placeholder="Paste the reseller API key">
       </div>
-      <div class="f">
-        <label for="provProvider">Adapter / provider type</label>
-        <input id="provProvider" type="text" value="bukkit-hosting" maxlength="60">
-        <div class="hint">Identifies the API dialect. Keep the default unless the upstream differs.</div>
+      <div class="f full" id="provLocalRow" style="display:none">
+        <div class="alert" style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.35)">
+          <strong>Own-node provider.</strong> No API key needed. Plans are built from the capacity of the nodes
+          in <em>Admin → Nodes</em>, and every order creates a real KVM or LXC server on that node.
+          Use <strong>Discover capacity</strong> below, then set your prices.
+        </div>
+      </div>
+      <div class="f full">
+        <label for="provProvider">Where do these servers come from?</label>
+        <select id="provProvider" onchange="onProviderTypeChange()">
+          <option value="bukkit-hosting">Upstream reseller API (I buy from someone else)</option>
+          <option value="local">My own nodes (I run KVM/LXC myself)</option>
+        </select>
+        <div class="hint" id="provProviderHint">Identifies the API dialect. Keep the default unless the upstream differs.</div>
       </div>
       <div class="f">
         <label for="provMarkup">Markup override (%) <span style="text-transform:none;font-weight:500">(blank = default)</span></label>
@@ -788,16 +798,38 @@ function renderConfig() {
     document.getElementById('cfgProviderStore').checked = !!current.storeEnabled;
     document.getElementById('cfgProviderNotes').value = current.notes || '';
     document.getElementById('cfgApiKey').placeholder = current.keyHint ? 'stored: ' + current.keyHint : 'paste this provider\'s API key';
+    const isLocal = current.provider === 'local';
     document.getElementById('editProviderMeta').textContent =
       (current.isDefault ? 'default provider · ' : '') +
-      (current.keyConfigured ? 'key ' + (current.keyHint || 'configured') : 'no API key stored') +
+      (isLocal
+        ? 'own-node provider (no upstream API)'
+        : (current.keyConfigured ? 'key ' + (current.keyHint || 'configured') : 'no API key stored')) +
       (current.storeEnabled ? ' · storefront open' : ' · storefront closed');
+
+    // Own-node providers do not talk to an upstream, so the API fields and the
+    // balance card are not meaningful for them.
+    const hide = isLocal ? 'none' : '';
+    ['cfgBaseUrl', 'cfgApiKey'].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = isLocal;
+      const wrap = el.closest('.f');
+      if (wrap) wrap.style.display = hide;
+    });
+    const testBtn = document.getElementById('cfgTestBtn');
+    if (testBtn) testBtn.style.display = hide;
   }
 
   const u = STATUS.upstream;
+  const localSelected = current && current.provider === 'local';
   document.getElementById('connNote').textContent = u.checkedAt ? 'last probe ' + u.checkedAt + ' UTC' : '';
   let html = '';
-  if (!STATUS.configured) {
+  if (localSelected) {
+    html = '<div class="alert" style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.35)">' +
+      '<strong>Own-node provider.</strong> Capacity is read live from your nodes. ' +
+      '<button class="btn btn-sm" onclick="showLocalCapacity()" style="margin-left:8px">Discover capacity</button>' +
+      '</div><div id="localCapacityBox" style="margin-top:10px"></div>';
+  } else if (!STATUS.configured) {
     html = '<div class="alert alert-warn">No API key stored yet.</div>';
   } else if (u.account) {
     html = '<dl style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px;margin:0">' +
@@ -956,6 +988,48 @@ function renderProviders() {
   }).join('');
 }
 
+/**
+ * Reads live capacity from the nodes we own and shows what is sellable.
+ * Used by the "Own nodes" provider type before syncing a catalogue.
+ */
+async function showLocalCapacity() {
+  const box = document.getElementById('localCapacityBox');
+  if (!box) return;
+  box.innerHTML = '<div style="color:var(--text-muted);font-size:12px">Reading node capacity…</div>';
+  try {
+    const r = await api('/api/v1/reseller/admin/providers/local-capacity');
+    const rows = r.capacity || [];
+    if (!rows.length) {
+      box.innerHTML = '<div class="alert alert-warn">No sellable capacity found. Add a node under ' +
+        '<strong>Admin → Nodes</strong>, make sure it is online and not in maintenance, and that its ' +
+        'capabilities have been detected.</div>';
+      return;
+    }
+    box.innerHTML =
+      '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">' +
+        rows.length + ' sellable configuration(s) across ' +
+        (r.nodes || []).length + ' node(s) · engines: ' + esc((r.engines || []).join(', ')) +
+      '</div>' +
+      '<div class="table-wrap" style="max-height:280px;overflow:auto"><table><thead><tr>' +
+        '<th>Node</th><th>Engine</th><th>Spec</th><th>Free</th><th></th>' +
+      '</tr></thead><tbody>' +
+      rows.map(function (c) {
+        return '<tr>' +
+          '<td>' + esc(c.nodeName) + '</td>' +
+          '<td><span class="pill info">' + esc(c.engine.toUpperCase()) + '</span></td>' +
+          '<td class="mono" style="font-size:11px">' + c.cores + ' vCPU · ' + c.memoryGb + ' GB · ' + c.diskGb + ' GB</td>' +
+          '<td>' + (c.available > 0 ? '<span class="pill ok">' + c.available + '</span>' : '<span class="pill err">0</span>') + '</td>' +
+          '<td><span style="font-size:10px;color:var(--text-muted)">' + esc(c.upstreamPlanId) + '</span></td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table></div>' +
+      '<div style="margin-top:8px;font-size:12px">Next: click <strong>sync</strong> on this provider to turn ' +
+      'this capacity into plans, then set your prices.</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="alert alert-error">' + esc(e.message) + '</div>';
+  }
+}
+
 function selectProvider(id) {
   editingProviderId = id;
   renderConfig();
@@ -966,6 +1040,20 @@ function editProvider(id) {
   editingProviderId = id;
   showTab('provider');
   renderConfig();
+}
+
+/**
+ * Own-node providers have no upstream API, so the URL/key fields are hidden and
+ * the base-URL requirement is dropped.
+ */
+function onProviderTypeChange() {
+  const isLocal = document.getElementById('provProvider').value === 'local';
+  document.getElementById('provBaseUrlRow').style.display = isLocal ? 'none' : '';
+  document.getElementById('provApiKeyRow').style.display = isLocal ? 'none' : '';
+  document.getElementById('provLocalRow').style.display = isLocal ? '' : 'none';
+  document.getElementById('provProviderHint').textContent = isLocal
+    ? 'Sells capacity from the nodes you run. Orders are provisioned on your own hardware.'
+    : 'Identifies the API dialect. Keep the default unless the upstream differs.';
 }
 
 function openProviderForm() {
@@ -983,6 +1071,7 @@ function openProviderForm() {
   document.getElementById('provStore').checked = true;
   document.getElementById('provDefault').checked = PROVIDERS.length === 0;
   document.getElementById('provNotes').value = '';
+  onProviderTypeChange();
   document.getElementById('providerOverlay').classList.add('open');
 }
 
@@ -1009,7 +1098,10 @@ async function submitProvider() {
     notes: document.getElementById('provNotes').value.trim() || null,
   };
   if (!payload.name) { errBox.innerHTML = '<div class="alert alert-error">A display name is required.</div>'; return; }
-  if (!payload.baseUrl) { errBox.innerHTML = '<div class="alert alert-error">An API base URL is required.</div>'; return; }
+  if (payload.provider !== 'local' && !payload.baseUrl) {
+    errBox.innerHTML = '<div class="alert alert-error">An API base URL is required.</div>';
+    return;
+  }
   btn.disabled = true;
   btn.textContent = 'Saving…';
   try {
@@ -1144,7 +1236,10 @@ function renderPlans() {
       '<td><label class="switch"><input type="checkbox" ' + (p.is_enabled ? 'checked' : '') + ' onchange="togglePlan(' + p.id + ', \'is_enabled\', this.checked)"><span class="slider"></span></label></td>' +
       '<td><strong>' + esc(p.display_name) + '</strong><div style="font-size:10px;color:var(--text-muted)">' + esc(p.kind) + (p.slug ? ' · ' + esc(p.slug) : '') + '</div></td>' +
       '<td>' + planProviderName(p.provider_id) + '</td>' +
-      '<td><span class="pill info">' + esc((p.cpu_label || p.cpu_family || '—')) + '</span></td>' +
+      '<td><span class="pill info">' + esc((p.cpu_label || p.cpu_family || '—')) + '</span>' +
+        (p.engine ? '<div style="font-size:10px;margin-top:2px"><span class="pill ok">' +
+          esc(String(p.engine).toUpperCase()) + ' on node #' + esc(p.node_id) + '</span></div>' : '') +
+      '</td>' +
       '<td>' + p.cores + '</td><td>' + p.memory_gb + ' GB</td><td>' + p.disk_gb + ' GB</td>' +
       '<td>' + p.connection_gbit + ' Gb</td><td>' + p.ipv4_count + '/' + p.ipv6_count + '</td>' +
       '<td class="mono">' + money(p.cost_cents) + '</td>' +
@@ -1153,7 +1248,11 @@ function renderPlans() {
       '<td><input class="cell" type="number" step="0.5" value="' + (p.setup_cents / 100).toFixed(2) + '" onchange="setPlanPrice(' + p.id + ', \'setup_cents\', this.value)"></td>' +
       '<td style="color:' + (margin >= 0 ? '#10B981' : '#F87171') + ';font-weight:700">' + money(margin) + '<div style="font-size:10px;font-weight:500">' + marginPct + '%</div></td>' +
       '<td><label class="switch"><input type="checkbox" ' + (p.is_visible ? 'checked' : '') + ' onchange="togglePlan(' + p.id + ', \'is_visible\', this.checked)"><span class="slider"></span></label></td>' +
-      '<td>' + (p.upstream_available ? '<span class="pill ok">in stock</span>' : '<span class="pill warn">no stock</span>') + '</td>' +
+      '<td>' + (p.engine
+        ? (Number(p.stock) > 0
+            ? '<span class="pill ok">' + p.stock + ' free</span>'
+            : '<span class="pill err">sold out</span>')
+        : (p.upstream_available ? '<span class="pill ok">in stock</span>' : '<span class="pill warn">no stock</span>')) + '</td>' +
       '<td><button class="btn btn-sm" onclick="quickPrice(' + p.id + ')">Apply markup</button></td>' +
     '</tr>';
   }).join('');

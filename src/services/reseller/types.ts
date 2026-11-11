@@ -492,6 +492,16 @@ export interface ResellerProviderRow {
 export interface ResellerPlanRow {
   id: number;
   provider_id: number | null;
+  /** Own-node plans: which engine provisions this (`kvm` | `lxc`). */
+  engine?: string | null;
+  /** Own-node plans: pin provisioning to a specific node. */
+  node_id?: number | null;
+  /** Own-node LXC plans: template slug, e.g. `ubuntu:24.04`. */
+  lxc_template?: string | null;
+  /** Own-node plans: bridge override. */
+  bridge?: string | null;
+  /** Own-node plans: units currently sellable (advisory). */
+  stock?: number | null;
   provider: string;
   upstream_plan_id: string | null;
   kind: 'package' | 'config';
@@ -544,6 +554,14 @@ export interface ResellerOsRow {
 }
 
 export interface CloudServerRow {
+  /** Own-node servers: `kvm` | `lxc`, null for upstream-resold servers. */
+  engine?: string | null;
+  /** Own-node servers: the node that hosts the instance. */
+  node_id?: number | null;
+  /** Own-node servers: primary key in `vms` / `lxc_instances`. */
+  instance_ref_id?: number | null;
+  /** Own-node servers: unified instance id, e.g. `kvm:12`. */
+  instance_uid?: string | null;
   id: number;
   user_id: number;
   order_id: number | null;

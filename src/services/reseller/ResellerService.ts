@@ -31,6 +31,13 @@ import {
   moneyToCents,
 } from './client';
 import {
+  LOCAL_PROVIDER_FAMILY,
+  LocalCapacityPlan,
+  LocalProvisionError,
+  LocalProvisioningEngine,
+} from './LocalProvisioningEngine';
+import { VirtualizationManager } from '../virtualization/VirtualizationManager';
+import {
   CloudServerRow,
   ResellerOsRow,
   ResellerPlanRow,
@@ -611,8 +618,40 @@ export class ResellerService {
   private pollRunning = false;
   private syncRunning = false;
 
-  constructor(db: UnifiedDatabase) {
+  /** Own-node provisioning; only created when a virtualization layer is wired. */
+  public readonly local: LocalProvisioningEngine | null = null;
+
+  constructor(db: UnifiedDatabase, virt?: VirtualizationManager) {
     this.db = db;
+    if (virt) {
+      this.local = new LocalProvisioningEngine(db, virt);
+    }
+  }
+
+  /** True when this provider sells capacity from our own nodes. */
+  public isLocalProvider(provider: { provider?: string | null } | null | undefined): boolean {
+    return String(provider?.provider || '').trim().toLowerCase() === LOCAL_PROVIDER_FAMILY;
+  }
+
+  /**
+   * Returns the own-node engine for a local provider, or throws a clear error
+   * when the panel was started without a virtualization layer.
+   */
+  private requireLocalEngine(provider: { provider?: string | null; name?: string | null }): LocalProvisioningEngine {
+    if (!this.local) {
+      throw new ResellerError(
+        `Provider "${provider.name || 'local'}" sells your own nodes, but this panel instance has no virtualization layer available.`,
+        503,
+        'local_engine_unavailable'
+      );
+    }
+    return this.local;
+  }
+
+  /** Live capacity for a local provider, used by the console and sync. */
+  public async getLocalCapacity(): Promise<LocalCapacityPlan[]> {
+    if (!this.local) return [];
+    return this.local.discoverCapacity();
   }
 
   // -------------------------------------------------------------------------
@@ -748,7 +787,10 @@ export class ResellerService {
   }): Promise<ResellerProviderRow> {
     const name = String(input.name || '').trim().slice(0, 80);
     if (!name) throw new ResellerError('A provider name is required.', 422, 'invalid_name');
-    const baseUrl = validateBaseUrl(input.baseUrl);
+
+    // `local` providers sell our own nodes: there is no upstream URL or API key.
+    const isLocal = String(input.provider || '').trim().toLowerCase() === LOCAL_PROVIDER_FAMILY;
+    const baseUrl = isLocal ? '' : validateBaseUrl(input.baseUrl);
 
     let slug = slugifyProvider(input.slug || name);
     if (!slug) slug = `provider-${Date.now().toString(36)}`;
@@ -840,7 +882,15 @@ export class ResellerService {
       if (!name) throw new ResellerError('A provider name is required.', 422, 'invalid_name');
       assign('name', name);
     }
-    if (patch.baseUrl !== undefined) assign('base_url', validateBaseUrl(patch.baseUrl));
+    if (patch.baseUrl !== undefined) {
+      const provFamily = String(patch.provider || provider.provider || '').toLowerCase();
+      assign(
+        'base_url',
+        provFamily === LOCAL_PROVIDER_FAMILY && !String(patch.baseUrl || '').trim()
+          ? null
+          : validateBaseUrl(patch.baseUrl)
+      );
+    }
     if (patch.provider !== undefined) {
       assign('provider', String(patch.provider || 'bukkit-hosting').slice(0, 60) || 'bukkit-hosting');
     }
@@ -1177,19 +1227,43 @@ export class ResellerService {
     } catch (err) {
       return { ready: false, enabled: false, reason: toResellerError(err).message, provider: null };
     }
-    if (!this.resolveProviderApiKey(provider)) {
-      return {
-        ready: false,
-        enabled: !!provider.is_enabled,
-        reason: `No API key configured for provider "${provider.name}".`,
-        provider,
-      };
-    }
     if (!provider.is_enabled) {
       return {
         ready: false,
         enabled: false,
         reason: `Provider "${provider.name}" is disabled.`,
+        provider,
+      };
+    }
+
+    // Own-node providers have no API key; they just need a virtualization
+    // layer and at least one sellable node.
+    if (this.isLocalProvider(provider)) {
+      if (!this.local) {
+        return {
+          ready: false,
+          enabled: true,
+          reason: `Provider "${provider.name}" sells your own nodes, but no virtualization layer is available.`,
+          provider,
+        };
+      }
+      const nodes = await this.local.listSellableNodes();
+      if (!nodes.length) {
+        return {
+          ready: false,
+          enabled: true,
+          reason: `Provider "${provider.name}" has no sellable nodes. Add a node, or take it out of maintenance.`,
+          provider,
+        };
+      }
+      return { ready: true, enabled: true, reason: null, provider };
+    }
+
+    if (!this.resolveProviderApiKey(provider)) {
+      return {
+        ready: false,
+        enabled: !!provider.is_enabled,
+        reason: `No API key configured for provider "${provider.name}".`,
         provider,
       };
     }
@@ -1556,11 +1630,21 @@ export class ResellerService {
     upstreamBalanceCents: number | null;
   }> {
     const provider = await this.resolveProvider(options.providerId);
-    const client = await this.requireReady(provider.id);
     const cfg = await this.getSettings();
     const markupPct = provider.markup_percent ?? cfg.reseller_default_markup_percent;
 
-    const [plans, osList] = await Promise.all([client.listKvmPlans(), client.listKvmOs()]);
+    // A local provider has no remote catalogue: its plans come from the
+    // capacity actually present on our nodes.
+    let plans: any[];
+    let osList: any[];
+    if (this.isLocalProvider(provider)) {
+      const engine = this.requireLocalEngine(provider);
+      plans = await engine.listPlansForSync();
+      osList = await engine.listAllOsImages();
+    } else {
+      const client = await this.requireReady(provider.id);
+      [plans, osList] = await Promise.all([client.listKvmPlans(), client.listKvmOs()]);
+    }
 
     let plansUpserted = 0;
     let plansNew = 0;
@@ -1601,7 +1685,8 @@ export class ResellerService {
              cost_cents = ?, cost_renew_cents = ?, retail_cents = ?, retail_renew_cents = ?,
              currency = ?, is_popular = ?, upstream_available = ?, upstream_exclusive = ?,
              upstream_discount_percent = ?, upstream_discount_ends_at = ?, upstream_raw = ?,
-             stock_state = ?, sort_order = ?, last_synced_at = datetime('now'),
+             stock_state = ?, sort_order = ?, engine = ?, node_id = ?, lxc_template = ?,
+             bridge = ?, stock = ?, last_synced_at = datetime('now'),
              updated_at = datetime('now')
            WHERE id = ?`,
           [
@@ -1628,6 +1713,11 @@ export class ResellerService {
             JSON.stringify(plan),
             plan.available ? 'available' : 'unavailable',
             existing.sort_order || sortIndex,
+            (plan as any).engine ?? existing.engine ?? null,
+            (plan as any).nodeId ?? existing.node_id ?? null,
+            (plan as any).lxcTemplate ?? existing.lxc_template ?? null,
+            (plan as any).bridge ?? existing.bridge ?? null,
+            num((plan as any).stock, 0),
             existing.id,
           ]
         );
@@ -1639,11 +1729,12 @@ export class ResellerService {
              provider_id, provider, upstream_plan_id, kind, slug, display_name, description,
              cpu_family, cpu_label, cores, memory_gb, disk_gb, ipv4_count, ipv6_count,
              connection_gbit, duration_months, cost_cents, cost_renew_cents,
-             retail_cents, retail_renew_cents, setup_cents, currency,
+             retail_cents, retail_renew_cents, currency,
              is_enabled, is_visible, is_popular, sort_order, stock_state,
              upstream_available, upstream_exclusive, upstream_discount_percent,
-             upstream_discount_ends_at, upstream_raw, last_synced_at, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),datetime('now'))`,
+             upstream_discount_ends_at, upstream_raw, engine, node_id, lxc_template,
+             bridge, stock, last_synced_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))`,
           [
             provider.id,
             provider.provider,
@@ -1665,7 +1756,6 @@ export class ResellerService {
             costCents,
             derivedRetail,
             derivedRetail,
-            0,
             'EUR',
             plan.popular ? 1 : 0,
             sortIndex,
@@ -1675,6 +1765,11 @@ export class ResellerService {
             num(plan.discountPercent),
             upstreamTimeToUtc(plan.discountEndsAt),
             JSON.stringify(plan),
+            (plan as any).engine ?? null,
+            (plan as any).nodeId ?? null,
+            (plan as any).lxcTemplate ?? null,
+            (plan as any).bridge ?? null,
+            num((plan as any).stock, 0),
           ]
         );
         plansUpserted += 1;
@@ -1736,6 +1831,8 @@ export class ResellerService {
     // live call on every page load.
     let upstreamBalanceCents: number | null = null;
     try {
+      if (this.isLocalProvider(provider)) throw new Error('local');
+      const client = await this.requireReady(provider.id);
       const balance = await client.getBalance();
       upstreamBalanceCents = moneyToCents(balance.amount);
       await this.db.run(
@@ -1908,6 +2005,7 @@ export class ResellerService {
       const cpu = String(plan.cpu_family || 'other').toLowerCase();
       if (!groups.has(cpu)) groups.set(cpu, []);
       const storePlan = toStorePlan(plan);
+      storePlan.providerName = owner.name;
       storePlan.providerId = plan.provider_id ?? null;
       storePlan.providerName = owner?.name || null;
       groups.get(cpu)!.push(storePlan);
@@ -2357,7 +2455,18 @@ export class ResellerService {
           'store_disabled'
         );
       }
-      if (plan.upstream_available === 0) {
+      // Own-node plans have no upstream availability flag; their stock is the
+      // node capacity recorded at sync time.
+      if (this.isLocalProvider(provider)) {
+        const stock = plan.stock;
+        if (stock !== null && stock !== undefined && Number(stock) <= 0) {
+          throw new ResellerError(
+            'This plan is sold out: the node it runs on has no capacity left.',
+            409,
+            'out_of_stock'
+          );
+        }
+      } else if (plan.upstream_available === 0) {
         throw new ResellerError('This plan is currently out of stock upstream.', 409, 'not_available');
       }
       cores = plan.cores;
@@ -2390,7 +2499,16 @@ export class ResellerService {
     }
 
     if (!provider) provider = await this.resolveProvider(input.providerId);
-    client = await this.requireReady(provider.id);
+    const orderingLocal = this.isLocalProvider(provider);
+    if (!orderingLocal) {
+      client = await this.requireReady(provider.id);
+    } else if (!this.local) {
+      throw new ResellerError(
+        `Provider "${provider.name}" sells your own nodes, but no virtualization layer is available.`,
+        503,
+        'local_engine_unavailable'
+      );
+    }
 
     // --- Validate OS + naming ---------------------------------------------
     const osImage = await this.db.get<ResellerOsRow>(
@@ -2401,9 +2519,12 @@ export class ResellerService {
     );
     if (!osImage) {
       // Fall back to a live check so a freshly published image still works.
+      // Own-node providers validate against the templates on the node.
       let live: UpstreamKvmOs | undefined;
       try {
-        const list = await client.listKvmOs();
+        const list = orderingLocal
+          ? await this.local!.listAllOsImages()
+          : await client!.listKvmOs();
         live = (list || []).find((o) => o.id === String(input.os));
       } catch {
         live = undefined;
@@ -2453,7 +2574,42 @@ export class ResellerService {
     if (input.sandbox) {
       orderPayload.sandbox = true;
       // Terms do not need confirming for a sandbox run.
-      const preview = await client.orderKvm(orderPayload, null);
+      //
+      // Own-node orders have no upstream to quote against: the preview reports
+      // what the order would consume on our own hardware and whether it fits.
+      if (orderingLocal) {
+        const capacity = await this.local!.discoverCapacity();
+        const match = capacity.find(
+          (c) =>
+            c.engine === (plan?.engine || 'lxc') &&
+            c.cores === cores &&
+            c.memoryGb === memoryGb &&
+            c.diskGb === diskGb
+        );
+        return {
+          orderId: 0,
+          orderRef: '',
+          status: 'preview',
+          sandbox: true,
+          retailCents: totalCents,
+          setupCents,
+          costCents: 0,
+          currency: 'EUR',
+          os: String(input.os),
+          cores,
+          memoryGb,
+          diskGb,
+          upstreamPriceCents: 0,
+          upstreamAvailable: !!match,
+          warnings: match ? [] : ['No node currently has room for this configuration.'],
+          preview: {
+            pricing: { orderPrice: centsToMoney(totalCents), currency: 'EUR' },
+            source: 'own-node',
+            capacity: match || null,
+          },
+        } as any;
+      }
+      const preview = await client!.orderKvm(orderPayload, null);
       const data = preview.preview as Record<string, unknown> | undefined;
       const pricing = (data?.pricing || null) as Record<string, unknown> | null;
       const balance = (data?.balance || null) as Record<string, unknown> | null;
@@ -2577,10 +2733,17 @@ export class ResellerService {
     if (!order) throw new ResellerError('Order not found.', 404, 'order_not_found');
 
     // Each order is pinned to the provider it was placed with, so a queued
-    // retry always goes back to the same upstream API.
-    let client: ResellerApiClient;
+    // retry always goes back to the same upstream API (or the same own-node
+    // capacity, for a local provider).
+    const orderProviderId = await this.providerIdForRow(order);
+    const orderProvider = orderProviderId ? await this.getProvider(orderProviderId) : null;
+    const isLocalOrder = this.isLocalProvider(orderProvider);
+
+    let client: ResellerApiClient | null = null;
     try {
-      client = await this.requireReady(await this.providerIdForRow(order));
+      if (!isLocalOrder) {
+        client = await this.requireReady(orderProviderId);
+      }
     } catch (err) {
       const e = toResellerError(err);
       if (e.code === 'reseller_not_configured' || e.code === 'provider_not_found') {
@@ -2658,8 +2821,41 @@ export class ResellerService {
 
     let upstream;
     try {
-      upstream = await client.orderKvm(payload, order.idempotency_key);
+      if (isLocalOrder) {
+        // Fulfil on our own hardware. No idempotency key is needed: the order
+        // row is the lock, and createLxcInstance refuses duplicate names.
+        const engine = this.requireLocalEngine(orderProvider || {});
+        const result = await engine.proviseLocalOrder({
+          orderId,
+          orderRef: String(order.order_ref || orderId),
+          userId: Number(order.user_id),
+          serverName: String(order.server_name || 'vps'),
+          engine: (plan?.engine as string) || (order.engine as string) || null,
+          nodeId: (plan?.node_id as number) ?? (order.node_id as number) ?? null,
+          cores: num(plan?.cores ?? order.cores, 1),
+          memoryGb: num(plan?.memory_gb ?? order.memory_gb, 1),
+          diskGb: num(plan?.disk_gb ?? order.disk_gb, 10),
+          osId: (order.os_id as string) || null,
+          osLabel: (order.os_label as string) || null,
+          lxcTemplate: (plan?.lxc_template as string) || null,
+          bridge: (plan?.bridge as string) || null,
+          durationDays: Math.round(num(order.duration_months, 1) * 30),
+        });
+        upstream = { result, requestId: null, replayed: false } as any;
+      } else {
+        upstream = await client!.orderKvm(payload, order.idempotency_key);
+      }
     } catch (err) {
+      // Own-node provisioning failures are ours, not an upstream's. A terminal
+      // one (missing host tooling, bad template) must not be retried forever.
+      if (err instanceof LocalProvisionError && err.terminal) {
+        await this.db.run(
+          `UPDATE reseller_orders SET error_code = ?, error_message = ?, updated_at = datetime('now') WHERE id = ?`,
+          [err.code, err.message.slice(0, 1000), orderId]
+        );
+        await this.markOrderFailed(orderId, err.code, err.message);
+        throw new ResellerError(err.message, 500, err.code);
+      }
       const apiErr = err instanceof UpstreamApiError ? err : null;
       if (apiErr && TERMINAL_ORDER_FAILURES.has(apiErr.code)) {
         await this.db.run(
@@ -2738,6 +2934,9 @@ export class ResellerService {
       retailCents: chargeCents - Math.round(order.setup_cents),
       costCents: upstreamPriceCents ?? Math.round(order.cost_cents),
       billingMode: paymentMode,
+      // Own-node orders carry a pointer back to the real instance so the
+      // customer's dashboard can drive it through the virtualization layer.
+      localInstance: (upstream as any)?.result?.localInstance || null,
     });
 
     await this.db.run(
@@ -2939,6 +3138,13 @@ export class ResellerService {
     retailCents?: number;
     costCents?: number;
     billingMode?: string;
+    localInstance?: {
+      engine: string;
+      nodeId: number | null;
+      refId: number;
+      uid: string;
+      primaryIp?: string | null;
+    } | null;
   }): Promise<number> {
     const d = params.detail;
     const existing = await this.db.get<CloudServerRow>(
@@ -2968,7 +3174,11 @@ export class ResellerService {
            name = ?, cpu_family = ?, cpu_label = ?, cores = ?, memory_gb = ?, disk_gb = ?,
            connection_gbit = ?, ipv4_count = ?, ipv6_count = ?, primary_ipv4 = ?, primary_ipv6 = ?,
            os_id = ?, os_label = ?, ssh_user = ?, credentials_enc = COALESCE(?, credentials_enc),
-           upstream_state = ?, expires_at = ?, last_synced_at = datetime('now'),
+           upstream_state = ?, expires_at = ?,
+           engine = COALESCE(?, engine), node_id = COALESCE(?, node_id),
+           instance_ref_id = COALESCE(?, instance_ref_id),
+           instance_uid = COALESCE(?, instance_uid),
+           last_synced_at = datetime('now'),
            last_error = NULL, updated_at = datetime('now')
          WHERE id = ?`,
         [
@@ -2989,6 +3199,10 @@ export class ResellerService {
           credentialsEnc,
           state,
           params.expiresAtUtc ?? existing.expires_at,
+          params.localInstance?.engine ?? null,
+          params.localInstance?.nodeId ?? null,
+          params.localInstance?.refId ?? null,
+          params.localInstance?.uid ?? null,
           existing.id,
         ]
       );
@@ -3001,9 +3215,10 @@ export class ResellerService {
          cores, memory_gb, disk_gb, connection_gbit, ipv4_count, ipv6_count, primary_ipv4,
          primary_ipv6, os_id, os_label, ssh_user, ssh_port, credentials_enc, upstream_state,
          power_status, retail_cents, renew_cents, cost_cents, currency, duration_months,
-         auto_renew, billing_mode, expires_at, suspended, last_synced_at, upstream_created_at,
+         auto_renew, billing_mode, expires_at, suspended, engine, node_id, instance_ref_id,
+         instance_uid, last_synced_at, upstream_created_at,
          created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,datetime('now'),datetime('now'))`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,datetime('now'),datetime('now'))`,
       [
         params.userId,
         params.orderId,
@@ -3038,6 +3253,10 @@ export class ResellerService {
         params.billingMode || 'wallet',
         params.expiresAtUtc ?? null,
         0,
+        params.localInstance?.engine ?? null,
+        params.localInstance?.nodeId ?? null,
+        params.localInstance?.refId ?? null,
+        params.localInstance?.uid ?? null,
         upstreamTimeToUtc(d.createdAt) || null,
       ]
     );
@@ -3135,6 +3354,12 @@ export class ResellerService {
       providerId: server.provider_id ?? null,
       provider: server.provider,
       upstreamProductId: server.provider_product_id,
+      // Own-node servers carry a local engine + node; upstream ones do not.
+      engine: server.engine ?? null,
+      nodeId: server.node_id ?? null,
+      instanceRefId: server.instance_ref_id ?? null,
+      instanceUid: server.instance_uid ?? null,
+      isLocal: server.engine === 'kvm' || server.engine === 'lxc',
       name: server.name,
       hostname: server.hostname,
       cpuFamily: server.cpu_family,
@@ -3178,7 +3403,6 @@ export class ResellerService {
     options: { withStatus?: boolean } = {}
   ): Promise<{ server: CloudServerRow; status: UpstreamKvmStatus | null }> {
     const server = await this.getCloudServer(serverId);
-    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError(
         'This server is not linked to an upstream product yet.',
@@ -3186,6 +3410,16 @@ export class ResellerService {
         'not_provisioned'
       );
     }
+    // Own-node servers report their own state; there is no upstream to poll.
+    if (server.engine === 'kvm' || server.engine === 'lxc') {
+      const status = await this.localServerStatus(server);
+      const refreshed = await this.getCloudServer(serverId);
+      return {
+        server: refreshed,
+        status: options.withStatus === false ? null : status,
+      };
+    }
+    const client = await this.requireReady(await this.providerIdForRow(server));
 
     const detail = await client.getKvm(server.provider_product_id);
     let status: UpstreamKvmStatus | null = null;
@@ -3248,7 +3482,14 @@ export class ResellerService {
     actor?: { userId: number; role: string }
   ): Promise<CloudServerRow> {
     const server = await this.getCloudServer(serverId);
-    const client = await this.requireReady(await this.providerIdForRow(server));
+    const serverProviderId = await this.providerIdForRow(server);
+    const isLocalServer = server.engine === 'kvm' || server.engine === 'lxc';
+
+    // Own-node servers are driven through the virtualization layer, not an API.
+    let client: ResellerApiClient | null = null;
+    if (!isLocalServer) {
+      client = await this.requireReady(serverProviderId);
+    }
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -3261,8 +3502,18 @@ export class ResellerService {
     }
 
     try {
-      if (action === 'restart') await client.kvmRestart(server.provider_product_id);
-      else await client.kvmPower(server.provider_product_id, action);
+      if (isLocalServer) {
+        const engine = this.requireLocalEngine({ name: server.provider });
+        await engine.powerAction(
+          server.engine as 'kvm' | 'lxc',
+          Number(server.instance_ref_id || 0),
+          action
+        );
+      } else if (action === 'restart') {
+        await client!.kvmRestart(server.provider_product_id);
+      } else {
+        await client!.kvmPower(server.provider_product_id, action);
+      }
     } catch (err) {
       if (err instanceof UpstreamApiError && (err.code === 'already_running' || err.code === 'already_stopped')) {
         // Treat as a no-op success and refresh state below.
@@ -3300,14 +3551,60 @@ export class ResellerService {
 
   public async serverStatus(serverId: number): Promise<UpstreamKvmStatus> {
     const server = await this.getCloudServer(serverId);
-    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
+    if (server.engine === 'kvm' || server.engine === 'lxc') {
+      return this.localServerStatus(server);
+    }
+    const client = await this.requireReady(await this.providerIdForRow(server));
     const status = await client.getKvmStatus(server.provider_product_id);
     await this.db.run(
       `UPDATE cloud_servers SET power_status = ?, upstream_state = ?, last_status_at = datetime('now') WHERE id = ?`,
       [String(status.status || 'unknown'), String(status.state || server.upstream_state), serverId]
+    );
+    return status;
+  }
+
+  /**
+   * Live state of an own-node server, read from the virtualization layer and
+   * mirrored into `cloud_servers` so the dashboard stays accurate.
+   */
+  private async localServerStatus(server: CloudServerRow): Promise<UpstreamKvmStatus> {
+    const engine = this.requireLocalEngine({ name: server.provider });
+    const kind = server.engine as 'kvm' | 'lxc';
+    const refId = Number(server.instance_ref_id || 0);
+    if (!refId) {
+      throw new ResellerError(
+        'This server is not linked to a local instance yet.',
+        409,
+        'not_provisioned'
+      );
+    }
+    const described = await engine.describeInstance(kind, refId);
+    const instance = described.instance;
+    const status = {
+      id: String(server.provider_product_id || described.detail.id || refId),
+      status: instance?.status || String(described.detail.state || 'unknown'),
+      state: instance?.status || String(described.detail.state || 'unknown'),
+      suspended: !!instance?.suspended,
+      primaryIpv4: instance?.primaryIp ?? null,
+      cpuCores: instance?.cpuCores ?? server.cores ?? null,
+      memoryMb: instance?.ramMb ?? null,
+      diskGb: instance?.diskGb ?? null,
+    } as unknown as UpstreamKvmStatus;
+
+    await this.db.run(
+      `UPDATE cloud_servers SET power_status = ?, upstream_state = ?,
+         primary_ipv4 = COALESCE(?, primary_ipv4), last_status_at = datetime('now'),
+         updated_at = datetime('now')
+       WHERE id = ?`,
+      [
+        String(status.status || 'unknown'),
+        String(instance?.status || server.upstream_state || 'unknown'),
+        instance?.primaryIp ?? null,
+        server.id,
+      ]
     );
     return status;
   }
@@ -4141,7 +4438,12 @@ function toStorePlan(plan: ResellerPlanRow): StorePlan {
     setupCents: plan.setup_cents,
     currency: plan.currency,
     popular: !!plan.is_popular,
-    available: plan.upstream_available !== 0,
+    // Own-node plans are available while the node still has room; upstream
+    // plans follow the upstream availability flag.
+    available:
+      plan.engine === 'kvm' || plan.engine === 'lxc'
+        ? plan.stock === null || plan.stock === undefined || Number(plan.stock) > 0
+        : plan.upstream_available !== 0,
     upstreamPlanId: plan.upstream_plan_id,
     upstreamConfig,
     discountPercent: plan.upstream_discount_percent,

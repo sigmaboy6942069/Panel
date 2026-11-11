@@ -424,6 +424,26 @@ export function createResellerApiRouter(svc: ResellerService): Router {
   // -------------------------------------------------------------------------
 
   /** Every configured upstream provider with its latest health figures. */
+  /**
+   * Live capacity a local (own-node) provider can sell right now: nodes,
+   * engines, and the standard shapes that currently fit.
+   */
+  router.get(
+    '/admin/providers/local-capacity',
+    requireStaff,
+    wrap(async (_req, res) => {
+      const capacity = await svc.getLocalCapacity();
+      res.json({
+        capacity,
+        total: capacity.length,
+        engines: Array.from(new Set(capacity.map((c) => c.engine))),
+        nodes: Array.from(
+          new Map(capacity.map((c) => [c.nodeId, { id: c.nodeId, name: c.nodeName }])).values()
+        ),
+      });
+    })
+  );
+
   router.get(
     '/admin/providers',
     requireStaff,
