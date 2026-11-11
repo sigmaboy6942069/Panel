@@ -15,9 +15,10 @@ database, uploads, or secrets**.
 5. [What the Script Actually Does](#5-what-the-script-actually-does)
 6. [Manual Commands (No Script)](#6-manual-commands-no-script)
 7. [Backups and Restore](#7-backups-and-restore)
-8. [Troubleshooting](#8-troubleshooting)
-9. [Private Repository: Auth on the VPS](#9-private-repository-auth-on-the-vps)
-10. [Command Reference](#10-command-reference)
+8. [Recovering an Empty or Wiped Install Directory](#8-recovering-an-empty-or-wiped-install-directory)
+9. [Troubleshooting](#9-troubleshooting)
+10. [Private Repository: Auth on the VPS](#10-private-repository-auth-on-the-vps)
+11. [Command Reference](#11-command-reference)
 
 ---
 
@@ -319,10 +320,128 @@ sqlite3 data/backups/pre_sync_*.db \
 
 ---
 
-## 8. Troubleshooting
+## 8. Recovering an Empty or Wiped Install Directory
+
+If `sync-from-github.sh` reports something like:
+
+```
+[WARN] No database found; continuing (fresh install?)
+...
+[WARN] Local uncommitted changes to tracked code files:
+         D app.js
+         D lib/db/database.js
+         D views/users/login.ejs
+         ...
+[FAIL] Commit or stash these on the VPS first.
+```
+
+…then every tracked file in your install directory is **deleted**. This is not
+an uncommitted edit; it means the directory was emptied (`rm -rf *`, a failed
+move, or the script run against the wrong folder).
+
+### Why git cannot fix this alone
+
+| Thing | In git? | Restorable by `git checkout`? |
+| --- | --- | --- |
+| Code (`app.js`, `src/`, `views/`, `lib/`…) | ✅ yes | **Yes** |
+| `data/tgvpanel.db` — your database | ⚠️ only the pristine template | **No** — restoring gives you an empty panel |
+| `.tgvpanel-secret` — credential keys | ❌ gitignored | **No** — and without it, stored credentials are unreadable forever |
+| `.env` | ❌ gitignored | **No** |
+
+### Step 1 — Find your data before touching anything
+
+```bash
+cd /opt/tgvpanel
+ls -la data/ .tgvpanel-secret .env 2>&1
+```
+
+If `data/tgvpanel.db` exists, **your data is safe** — only code is missing.
+
+If it is gone, search before restoring anything (do this first, before any git
+command creates a fresh database on top of the old path):
+
+```bash
+find / -name 'tgvpanel.db' -o -name 'pre_sync_*.db' -o -name 'tgvpanel.db-*' 2>/dev/null
+```
+
+Also check for a surviving `-wal` file — it can hold data that is not yet in the
+main file:
+
+```bash
+ls -la data/tgvpanel.db-wal data/tgvpanel.db-shm 2>/dev/null
+```
+
+If you find `tgvpanel.db` **and** its `-wal`, keep them together. Copying the
+`.db` without the `-wal` loses the newest writes (see [§2](#the-wal-trap)).
+
+### Step 2 — Restore the code
+
+This restores **only tracked files** from the repository. It does not touch
+`data/`, `.env`, or `.tgvpanel-secret`.
+
+```bash
+cd /opt/tgvpanel
+git checkout main -- .
+git status --short          # expect: only sync.sh, data/, .env untracked
+```
+
+### Step 3 — Put the data back (only if step 1 showed it missing)
+
+```bash
+# If you found a copy elsewhere:
+mkdir -p data
+cp /path/to/found/tgvpanel.db data/tgvpanel.db
+# If you also found its -wal, copy that too, otherwise remove any stale one:
+cp /path/to/found/tgvpanel.db-wal data/tgvpanel.db-wal 2>/dev/null || true
+
+# If you have a backup from data/backups/:
+cp data/backups/pre_sync_YYYYMMDDTHHMMSSZ.db data/tgvpanel.db
+rm -f data/tgvpanel.db-wal data/tgvpanel.db-shm
+```
+
+Then verify it opens:
+
+```bash
+sqlite3 data/tgvpanel.db 'PRAGMA integrity_check; SELECT COUNT(*) FROM users;'
+```
+
+### Step 4 — Restore secrets
+
+```bash
+# From your own backup:
+cp /path/to/.tgvpanel-secret .tgvpanel-secret
+chmod 600 .tgvpanel-secret
+```
+
+> If `.tgvpanel-secret` is lost **and** you have no backup, stored credentials
+> (reseller API keys, server root passwords) cannot be decrypted. The panel will
+> run, but those values are gone and must be re-entered. Keep a copy of this
+> file off-server.
+
+### Step 5 — Rebuild and start
+
+```bash
+npm install
+npm run build
+npm run migrate
+sudo systemctl start tgvpanel
+sudo journalctl -u tgvpanel -n 40 --no-pager
+```
+
+### Prevention
+
+- Keep `data/` **outside** the git checkout, or at least never `rm -rf` the
+  install directory. `TGVPANEL_DATA_DIR=/var/lib/tgvpanel` in `.env` moves the
+  database out of the repo entirely — the cleanest long-term fix.
+- Copy `.tgvpanel-secret` and `data/backups/` somewhere off-server regularly.
+
+---
+
+## 9. Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
+| Every file shows `D` (deleted) | Install directory was emptied | See [§8](#8-recovering-an-empty-or-wiped-install-directory) — do not run `git checkout` before checking for your database |
 | `Not a git checkout: /opt` | Old script copied to the repo root; it walked up one level | Update the script ([§3.2](#32-install-the-sync-script)), or run `cd /opt/tgvpanel && sudo ./sync.sh main` |
 | `Database backup failed` | No `sqlite3` CLI and no `node:sqlite` | Install `sqlite3`, or use Node 22+ |
 | `Local uncommitted changes to tracked code files` | Someone edited code on the VPS | Commit, or `git stash` those paths |
@@ -343,7 +462,7 @@ sudo journalctl -u tgvpanel -f            # follow live
 
 ---
 
-## 9. Private Repository: Auth on the VPS
+## 10. Private Repository: Auth on the VPS
 
 If your repo is **private**, `git fetch` on the VPS needs credentials. A
 browser-based GitHub edit does not grant the VPS access by itself.
@@ -382,7 +501,7 @@ Once configured, `git fetch` works unattended inside `scripts/update.sh` too.
 
 ---
 
-## 10. Command Reference
+## 11. Command Reference
 
 ```bash
 # ---------- routine sync ----------

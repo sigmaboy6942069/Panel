@@ -194,9 +194,43 @@ fi
 # Refuse to clobber local edits to CODE (protected paths excluded).
 CODE_DIRTY="$(git status --porcelain --untracked-files=no \
   | grep -vE '^(..) (data/|\.env$|\.tgvpanel-secret$|\.hkvm-secret$)' || true)"
+
+# A tree where every single tracked file is deleted usually means the install
+# directory was wiped (or the script was run against the wrong directory).
+# Distinguish that from ordinary local edits, because the fixes are different.
+DELETED_COUNT="$(printf '%s\n' "$CODE_DIRTY" | grep -cE '^ ?D ' || true)"
+TRACKED_COUNT="$(git ls-files | wc -l)"
+MODIFIED_COUNT="$(printf '%s\n' "$CODE_DIRTY" | grep -cE '^ ?M ' || true)"
+
 if [[ -n "$CODE_DIRTY" ]]; then
+  if [[ "$MODIFIED_COUNT" -eq 0 && "$DELETED_COUNT" -ge 1 && "$DELETED_COUNT" -ge "$((TRACKED_COUNT - 3))" ]]; then
+    echo
+    warn "This install directory is EMPTY: $DELETED_COUNT of $TRACKED_COUNT tracked files are gone."
+    echo
+    echo "  The database and .env are NOT in git, so git cannot restore them."
+    echo "  First check whether your data still exists:"
+    echo "      ls -la data/ .tgvpanel-secret .env"
+    echo
+    if [[ -n "$ACTIVE_DB" ]]; then
+      echo "  data/tgvpanel.db EXISTS -> your data is safe; restore the code with:"
+    else
+      echo "  data/tgvpanel.db is MISSING -> look for it before restoring anything:"
+      echo "      find / -name 'tgvpanel.db' -o -name 'pre_sync_*.db' 2>/dev/null"
+      echo "  Then put it back at data/tgvpanel.db and re-run this script."
+      echo
+      echo "  Restoring the code (this will not touch data/ or .env):"
+    fi
+    echo "      git checkout $(git rev-parse --abbrev-ref HEAD) -- ."
+    echo
+    die "Refusing to continue with an empty working tree."
+  fi
+
   warn "Local uncommitted changes to tracked code files:"
-  echo "$CODE_DIRTY" | sed 's/^/        /'
+  echo "$CODE_DIRTY" | head -20 | sed 's/^/        /'
+  [[ "$(printf '%s\n' "$CODE_DIRTY" | wc -l)" -gt 20 ]] && echo "        ... and more"
+  echo
+  echo "Either commit/stash them, or discard them and take the repo version:"
+  echo "    git checkout $(git rev-parse --abbrev-ref HEAD) -- <path>"
   echo
   die "Commit or stash these on the VPS first. (Your data/ and .env are NOT the problem.)"
 fi
