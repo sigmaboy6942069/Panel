@@ -21,7 +21,7 @@
  */
 import { UnifiedDatabase } from '../../db/database';
 import { ResellerApiClient, UpstreamApiError } from './client';
-import { CloudServerRow, ResellerOsRow, ResellerPlanRow, UpstreamAccount, UpstreamFirewall, UpstreamKvmConfigurator, UpstreamKvmConfiguratorPrice, UpstreamKvmNetwork, UpstreamKvmStatistics, UpstreamKvmStatus, UpstreamRateLimitInfo, UpstreamRenewQuote, UpstreamResellerInfo, WalletEntryRow } from './types';
+import { CloudServerRow, ResellerOsRow, ResellerPlanRow, ResellerProviderRow, UpstreamAccount, UpstreamFirewall, UpstreamKvmConfigurator, UpstreamKvmConfiguratorPrice, UpstreamKvmNetwork, UpstreamKvmStatistics, UpstreamKvmStatus, UpstreamRateLimitInfo, UpstreamRenewQuote, UpstreamResellerInfo, WalletEntryRow } from './types';
 export declare class ResellerError extends Error {
     readonly statusCode: number;
     readonly code: string;
@@ -74,12 +74,22 @@ export declare function formatUtcForDisplay(utcValue: string | null | undefined)
 export declare function cpuFamilyLabel(family: string | null | undefined, planName?: string | null): string;
 /** Builds a stable, human slug for a configurator-backed plan. */
 export declare function configPlanSlug(cpu: string, cores: number, memoryGb: number, diskGb: number): string;
+/** Normalises a provider display name into a stable slug. */
+export declare function slugifyProvider(value: unknown): string;
+/** Validates a provider API base URL and returns it without a trailing slash. */
+export declare function validateBaseUrl(value: unknown): string;
 /** Package plan slug keeps the upstream name recognisable. */
 export declare function packagePlanSlug(name: string, upstreamId: string): string;
 export interface PlaceOrderInput {
     userId: number;
     /** Local `reseller_plans.id`. Required for package plans. */
     planId?: number | null;
+    /**
+     * Which upstream provider to buy from. Package plans carry their own
+     * provider; this is only needed for custom configurations and as a
+     * fallback when nothing else names a provider.
+     */
+    providerId?: number | null;
     /** Custom configuration (only when the configurator is enabled by the admin). */
     config?: {
         cpu: string;
@@ -108,6 +118,9 @@ export interface PlaceOrderInput {
 export interface OrderOutcome {
     orderId: number;
     orderRef: string;
+    /** Upstream provider that fulfils this order. */
+    providerId: number | null;
+    providerName: string | null;
     status: string;
     sandbox: boolean;
     retailCents: number;
@@ -137,6 +150,8 @@ export interface OrderOutcome {
 }
 export interface StorePlan {
     id: number;
+    providerId: number | null;
+    providerName: string | null;
     slug: string | null;
     kind: 'package' | 'config';
     displayName: string;
@@ -167,6 +182,21 @@ export interface ResellerStatus {
     provider: string;
     baseUrl: string;
     keyHint: string;
+    /** Provider the figures below belong to (null when none is configured). */
+    providerId: number | null;
+    providerName: string | null;
+    /** All providers with a lightweight health/rollup summary. */
+    providers: ProviderSummary[];
+    /** `providers` aggregated, i.e. what the whole panel resells. */
+    totals: {
+        providers: number;
+        enabled: number;
+        configured: number;
+        plansEnabled: number;
+        serversTotal: number;
+        monthlyMarginCents: number;
+        pendingOrders: number;
+    };
     upstream: {
         reachable: boolean;
         checkedAt: string | null;
@@ -216,11 +246,41 @@ export interface ResellerStatus {
     };
     lowBalanceAlert: boolean;
 }
+/** Per-provider rollup rendered in the admin provider table. */
+export interface ProviderSummary {
+    id: number;
+    slug: string;
+    name: string;
+    provider: string;
+    baseUrl: string;
+    keyHint: string;
+    keyConfigured: boolean;
+    isDefault: boolean;
+    enabled: boolean;
+    storeEnabled: boolean;
+    markupPercent: number | null;
+    requestTimeoutMs: number;
+    lastSyncAt: string | null;
+    lastProbeAt: string | null;
+    lastBalanceCents: number | null;
+    lastError: string | null;
+    lastErrorAt: string | null;
+    notes: string | null;
+    plansTotal: number;
+    plansEnabled: number;
+    osImages: number;
+    serversTotal: number;
+    serversActive: number;
+    ordersPending: number;
+    monthlyRetailCents: number;
+    monthlyCostCents: number;
+    lowBalanceAlert: boolean;
+}
 export declare class ResellerService {
     /** Shared panel database — exposed for audit logging from route handlers. */
     readonly db: UnifiedDatabase;
-    private client;
-    private clientFingerprint;
+    /** One HTTP client per provider id, rebuilt when its config changes. */
+    private readonly clients;
     private readonly inFlightOrders;
     private pollTimer;
     private syncTimer;
@@ -239,11 +299,92 @@ export declare class ResellerService {
     /** Resolves the plaintext API key: encrypted setting first, then `.env`. */
     resolveApiKey(settings?: ResellerSettings): Promise<string>;
     /**
-     * Returns a configured client, rebuilding it only when base URL / key /
-     * timeout changed. Callers that need to know whether a key exists should
-     * check `isConfigured()`.
+     * Stores one provider's API key encrypted at rest and keeps a short hint.
+     * An empty key clears it.
      */
-    getClient(): Promise<ResellerApiClient>;
+    setProviderApiKey(providerId: number, rawKey: string): Promise<{
+        hint: string;
+    }>;
+    /** Creates an additional upstream provider. */
+    createProvider(input: {
+        name: string;
+        slug?: string | null;
+        provider?: string;
+        baseUrl: string;
+        apiKey?: string | null;
+        enabled?: boolean;
+        storeEnabled?: boolean;
+        markupPercent?: number | null;
+        requestTimeoutMs?: number;
+        notes?: string | null;
+        makeDefault?: boolean;
+        actorId?: number | null;
+    }): Promise<ResellerProviderRow>;
+    /**
+     * Updates a provider's connection settings. The API key is only touched
+     * when `apiKey` is provided (a non-empty string sets it, `''` clears it).
+     */
+    updateProvider(providerId: number, patch: {
+        name?: string;
+        baseUrl?: string;
+        provider?: string;
+        enabled?: boolean;
+        storeEnabled?: boolean;
+        markupPercent?: number | null;
+        requestTimeoutMs?: number;
+        notes?: string | null;
+        isDefault?: boolean;
+        apiKey?: string | null;
+        actorId?: number | null;
+    }): Promise<ResellerProviderRow>;
+    /**
+     * Deletes a provider. Refuses while it still has servers or open orders,
+     * so a removal can never orphan a customer's VPS.
+     */
+    deleteProvider(providerId: number, actorId?: number | null): Promise<void>;
+    /** Sets the fallback provider used when callers do not specify one. */
+    setDefaultProvider(providerId: number): Promise<ResellerProviderRow>;
+    /** Probes one provider without persisting anything but the probe result. */
+    probeProvider(providerId: number): Promise<ResellerStatus>;
+    /** Aggregated health/rollup for every provider. */
+    /**
+     * Public, camelCase view of a provider row. Never includes the encrypted
+     * key blob — only a masked hint plus a boolean. Every provider endpoint
+     * (list, create, update, default) returns this shape so API clients and
+     * the admin console never have to switch between snake_case and camelCase.
+     */
+    serializeProvider(provider: ResellerProviderRow): ProviderSummary;
+    getProviderSummaries(options?: {
+        probeUpstream?: boolean;
+    }): Promise<ProviderSummary[]>;
+    /** Every configured upstream provider, default first. */
+    listProviders(options?: {
+        enabledOnly?: boolean;
+    }): Promise<ResellerProviderRow[]>;
+    getProvider(providerId: number): Promise<ResellerProviderRow>;
+    /**
+     * Resolves a provider by id, falling back to the panel default. `null`
+     * means "let the panel decide", which keeps single-provider installs and
+     * older API clients working unchanged.
+     */
+    resolveProvider(providerId?: number | null): Promise<ResellerProviderRow>;
+    /** The provider used when a caller does not name one. */
+    getDefaultProvider(): Promise<ResellerProviderRow>;
+    /** Decrypts a provider's API key, falling back to `RESELLER_API_KEY` for the default one. */
+    resolveProviderApiKey(provider: Pick<ResellerProviderRow, 'api_key_enc' | 'is_default'>): string;
+    /** Whether an upstream call may be made for this provider right now. */
+    isProviderReady(providerId?: number | null): Promise<{
+        ready: boolean;
+        enabled: boolean;
+        reason: string | null;
+        provider: ResellerProviderRow | null;
+    }>;
+    /**
+     * Returns a configured client for one provider, rebuilding it only when
+     * its base URL / key / timeout changed.
+     */
+    getClient(providerId?: number | null): Promise<ResellerApiClient>;
+    /** Backwards-compatible readiness probe for the default provider. */
     isReady(): Promise<{
         ready: boolean;
         enabled: boolean;
@@ -251,10 +392,18 @@ export declare class ResellerService {
     }>;
     /** Guards every upstream-touching operation. */
     private requireReady;
+    /** Resolves the provider behind a stored order/server row. */
+    private providerIdForRow;
     private writeApiLog;
-    listApiLogs(limit?: number): Promise<Record<string, unknown>[]>;
+    listApiLogs(limit?: number, providerId?: number | null): Promise<Record<string, unknown>[]>;
+    /**
+     * Health + aggregates. Scoped to one provider by default (the default
+     * provider) and always accompanied by a summary of every provider, so the
+     * admin console can show the whole reselling business at a glance.
+     */
     getStatus(options?: {
         probeUpstream?: boolean;
+        providerId?: number | null;
     }): Promise<ResellerStatus>;
     /**
      * Pulls `GET /kvm/plans` and `GET /kvm/os` from the provider and upserts the
@@ -269,7 +418,10 @@ export declare class ResellerService {
      */
     syncCatalogue(options?: {
         actorId?: number | null;
+        providerId?: number | null;
     }): Promise<{
+        providerId: number;
+        providerName: string;
         plansUpserted: number;
         plansNew: number;
         plansDisabled: number;
@@ -278,7 +430,7 @@ export declare class ResellerService {
         upstreamBalanceCents: number | null;
     }>;
     /** Fetches live configurator limits/prices (not persisted; priced on demand). */
-    getConfigurator(cpu?: string): Promise<UpstreamKvmConfigurator[]>;
+    getConfigurator(cpu?: string, providerId?: number | null): Promise<UpstreamKvmConfigurator[]>;
     getConfiguratorPrice(params: {
         cpu: string;
         cores: number;
@@ -288,6 +440,7 @@ export declare class ResellerService {
         ipv6?: number;
         voucher?: string;
         markupPercent?: number | null;
+        providerId?: number | null;
     }): Promise<{
         upstream: UpstreamKvmConfiguratorPrice;
         costCents: number;
@@ -296,15 +449,25 @@ export declare class ResellerService {
     }>;
     listOsImages(options?: {
         enabledOnly?: boolean;
+        providerId?: number | null;
+        storeProvidersOnly?: boolean;
     }): Promise<ResellerOsRow[]>;
     listPlans(options?: {
         enabledOnly?: boolean;
         visibleOnly?: boolean;
         cpu?: string;
+        providerId?: number | null;
+        storeProvidersOnly?: boolean;
     }): Promise<ResellerPlanRow[]>;
     /** Customer-facing catalogue grouped by CPU family. */
     getStoreCatalogue(): Promise<{
         enabled: boolean;
+        providers: Array<{
+            id: number;
+            name: string;
+            isDefault: boolean;
+            storeEnabled: boolean;
+        }>;
         groups: Array<{
             cpu: string;
             label: string;
@@ -353,6 +516,7 @@ export declare class ResellerService {
         setupCents?: number;
         enable?: boolean;
         actorId?: number | null;
+        providerId?: number | null;
     }): Promise<ResellerPlanRow>;
     getWalletBalance(userId: number): Promise<number>;
     getWalletLedger(userId: number, limit?: number): Promise<WalletEntryRow[]>;
@@ -397,6 +561,7 @@ export declare class ResellerService {
     listOrders(options?: {
         userId?: number;
         status?: string;
+        providerId?: number | null;
         limit?: number;
         offset?: number;
     }): Promise<{
@@ -410,6 +575,7 @@ export declare class ResellerService {
         includeShared?: boolean;
         state?: string;
         search?: string;
+        providerId?: number | null;
         limit?: number;
     }): Promise<CloudServerRow[]>;
     getCloudServer(serverId: number): Promise<CloudServerRow>;
@@ -504,6 +670,7 @@ export declare class ResellerService {
     /** Starts the provisioning poller and the catalogue sync timer. */
     startBackgroundJobs(): void;
     stopBackgroundJobs(): void;
+    /** Re-syncs every provider that is enabled, configured and selling. */
     private syncCatalogueIfEnabled;
     /**
      * One reconciliation pass:
@@ -520,7 +687,8 @@ export declare class ResellerService {
         errors: string[];
     }>;
     private onServerBecameActive;
-    private lastBalanceAlertAt;
+    /** Last low-balance notification, keyed by provider id. */
+    private readonly lastBalanceAlertAt;
     private checkUpstreamBalanceAlert;
     private markOrderFailed;
     /**

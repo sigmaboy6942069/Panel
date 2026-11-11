@@ -114,6 +114,15 @@ The installer will:
 
 To upgrade later, run `sudo bash scripts/update.sh` (capability detection and DB backup included).
 
+If you edit files in the GitHub web UI and want to push just those changes to a live
+install, use `sudo ./scripts/sync-from-github.sh main` — see
+[docs/SYNCING_CODE_TO_VPS.md](docs/SYNCING_CODE_TO_VPS.md) for the full tutorial.
+
+> **Never run `git checkout -- data/tgvpanel.db`, `git reset --hard` or `git clean -fdx`.**
+> The live database is tracked by git, so those commands revert it (and `clean` deletes
+> `.tgvpanel-secret`, permanently orphaning every encrypted credential). Back up with
+> `VACUUM INTO`, never `cp` — see the tutorial for why.
+
 ### Option 3: Manual setup
 
 ```bash
@@ -231,8 +240,9 @@ TGVPANEL/
 │       └── web-routes.ts   # Admin (23 sections) and user EJS routes
 ├── views/                  # EJS templates (dark/light, local xterm.js)
 ├── public/                 # CSS, tgvpanel-v3.js client helper, /vendor/xterm/
-├── scripts/                # install.sh, update.sh
-├── docs/                   # Multi-node setup guide, source audit, migration checklist, PostgreSQL 15+ guide
+├── scripts/                # install.sh, update.sh, sync-from-github.sh
+├── docs/                   # Multi-node setup, source audit, migration checklist, PostgreSQL 15+,
+│                           #   reseller integration, data-safe VPS sync tutorial
 └── tests/run-all.js        # 20-suite integration and security runner
 ```
 

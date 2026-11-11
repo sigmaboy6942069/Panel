@@ -34,6 +34,7 @@ import {
   CloudServerRow,
   ResellerOsRow,
   ResellerPlanRow,
+  ResellerProviderRow,
   UpstreamAccount,
   UpstreamFirewall,
   UpstreamKvmConfigurator,
@@ -352,6 +353,31 @@ export function configPlanSlug(cpu: string, cores: number, memoryGb: number, dis
   return `cfg-${clean}-${cores}c-${memoryGb}g-${diskGb}g`;
 }
 
+/** Normalises a provider display name into a stable slug. */
+export function slugifyProvider(value: unknown): string {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+}
+
+/** Validates a provider API base URL and returns it without a trailing slash. */
+export function validateBaseUrl(value: unknown): string {
+  const raw = String(value ?? '').trim().replace(/\/+$/, '');
+  if (!raw) throw new ResellerError('An API base URL is required.', 422, 'invalid_base_url');
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new ResellerError(`"${raw}" is not a valid URL.`, 422, 'invalid_base_url');
+  }
+  if (!/^https?:$/.test(parsed.protocol)) {
+    throw new ResellerError('The API base URL must be http or https.', 422, 'invalid_base_url');
+  }
+  return parsed.toString().replace(/\/+$/, '');
+}
+
 /** Package plan slug keeps the upstream name recognisable. */
 export function packagePlanSlug(name: string, upstreamId: string): string {
   const clean = String(name || '')
@@ -370,6 +396,12 @@ export interface PlaceOrderInput {
   userId: number;
   /** Local `reseller_plans.id`. Required for package plans. */
   planId?: number | null;
+  /**
+   * Which upstream provider to buy from. Package plans carry their own
+   * provider; this is only needed for custom configurations and as a
+   * fallback when nothing else names a provider.
+   */
+  providerId?: number | null;
   /** Custom configuration (only when the configurator is enabled by the admin). */
   config?: { cpu: string; cores: number; memory: number; disk: number; ipv4?: number; ipv6?: number } | null;
   os: string;
@@ -392,6 +424,9 @@ export interface PlaceOrderInput {
 export interface OrderOutcome {
   orderId: number;
   orderRef: string;
+  /** Upstream provider that fulfils this order. */
+  providerId: number | null;
+  providerName: string | null;
   status: string;
   sandbox: boolean;
   retailCents: number;
@@ -416,6 +451,8 @@ export interface OrderOutcome {
 
 export interface StorePlan {
   id: number;
+  providerId: number | null;
+  providerName: string | null;
   slug: string | null;
   kind: 'package' | 'config';
   displayName: string;
@@ -447,6 +484,21 @@ export interface ResellerStatus {
   provider: string;
   baseUrl: string;
   keyHint: string;
+  /** Provider the figures below belong to (null when none is configured). */
+  providerId: number | null;
+  providerName: string | null;
+  /** All providers with a lightweight health/rollup summary. */
+  providers: ProviderSummary[];
+  /** `providers` aggregated, i.e. what the whole panel resells. */
+  totals: {
+    providers: number;
+    enabled: number;
+    configured: number;
+    plansEnabled: number;
+    serversTotal: number;
+    monthlyMarginCents: number;
+    pendingOrders: number;
+  };
   upstream: {
     reachable: boolean;
     checkedAt: string | null;
@@ -493,6 +545,37 @@ export interface ResellerStatus {
   lowBalanceAlert: boolean;
 }
 
+/** Per-provider rollup rendered in the admin provider table. */
+export interface ProviderSummary {
+  id: number;
+  slug: string;
+  name: string;
+  provider: string;
+  baseUrl: string;
+  keyHint: string;
+  keyConfigured: boolean;
+  isDefault: boolean;
+  enabled: boolean;
+  storeEnabled: boolean;
+  markupPercent: number | null;
+  requestTimeoutMs: number;
+  lastSyncAt: string | null;
+  lastProbeAt: string | null;
+  lastBalanceCents: number | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  notes: string | null;
+  plansTotal: number;
+  plansEnabled: number;
+  osImages: number;
+  serversTotal: number;
+  serversActive: number;
+  ordersPending: number;
+  monthlyRetailCents: number;
+  monthlyCostCents: number;
+  lowBalanceAlert: boolean;
+}
+
 const TERMINAL_ORDER_FAILURES = new Set([
   'insufficient_balance',
   'validation_failed',
@@ -520,8 +603,8 @@ const PRODUCT_NAME_PATTERN = /^[A-Za-z0-9 ._,:;!?()#&+@/-]{1,50}$/;
 export class ResellerService {
   /** Shared panel database — exposed for audit logging from route handlers. */
   public readonly db: UnifiedDatabase;
-  private client: ResellerApiClient | null = null;
-  private clientFingerprint = '';
+  /** One HTTP client per provider id, rebuilt when its config changes. */
+  private readonly clients = new Map<number, { fingerprint: string; client: ResellerApiClient }>();
   private readonly inFlightOrders = new Map<number, Promise<OrderOutcome>>();
   private pollTimer: NodeJS.Timeout | null = null;
   private syncTimer: NodeJS.Timeout | null = null;
@@ -584,8 +667,8 @@ export class ResellerService {
       [key, value === null || value === undefined ? '' : String(value)]
     );
     if (key.startsWith('reseller_api_') || key === 'reseller_enabled') {
-      this.client = null;
-      this.clientFingerprint = '';
+      // Any credential/enable change invalidates every cached client.
+      this.clients.clear();
     }
   }
 
@@ -611,84 +694,569 @@ export class ResellerService {
 
   /** Resolves the plaintext API key: encrypted setting first, then `.env`. */
   public async resolveApiKey(settings?: ResellerSettings): Promise<string> {
-    const cfg = settings || (await this.getSettings());
-    if (cfg.reseller_api_key_enc) {
+    return this.resolveProviderApiKey(settings ? {
+      api_key_enc: settings.reseller_api_key_enc,
+      is_default: 1,
+    } : await this.getDefaultProvider());
+  }
+
+  /**
+   * Stores one provider's API key encrypted at rest and keeps a short hint.
+   * An empty key clears it.
+   */
+  public async setProviderApiKey(providerId: number, rawKey: string): Promise<{ hint: string }> {
+    const provider = await this.getProvider(providerId);
+    const key = String(rawKey || '').trim();
+    if (!key) {
+      await this.db.run(
+        `UPDATE reseller_providers SET api_key_enc = NULL, api_key_hint = NULL,
+           last_error = NULL, last_error_at = NULL, updated_at = datetime('now')
+         WHERE id = ?`,
+        [provider.id]
+      );
+      this.clients.delete(provider.id);
+      return { hint: '' };
+    }
+    if (key.length > 512) {
+      throw new ResellerError('That API key looks too long to be valid.', 422, 'invalid_api_key');
+    }
+    const hint = `${key.slice(0, Math.min(6, key.length))}…${key.slice(-4)}`;
+    await this.db.run(
+      `UPDATE reseller_providers SET api_key_enc = ?, api_key_hint = ?,
+         last_error = NULL, last_error_at = NULL, updated_at = datetime('now')
+       WHERE id = ?`,
+      [encryptSecret(key), hint, provider.id]
+    );
+    this.clients.delete(provider.id);
+    return { hint };
+  }
+
+  /** Creates an additional upstream provider. */
+  public async createProvider(input: {
+    name: string;
+    slug?: string | null;
+    provider?: string;
+    baseUrl: string;
+    apiKey?: string | null;
+    enabled?: boolean;
+    storeEnabled?: boolean;
+    markupPercent?: number | null;
+    requestTimeoutMs?: number;
+    notes?: string | null;
+    makeDefault?: boolean;
+    actorId?: number | null;
+  }): Promise<ResellerProviderRow> {
+    const name = String(input.name || '').trim().slice(0, 80);
+    if (!name) throw new ResellerError('A provider name is required.', 422, 'invalid_name');
+    const baseUrl = validateBaseUrl(input.baseUrl);
+
+    let slug = slugifyProvider(input.slug || name);
+    if (!slug) slug = `provider-${Date.now().toString(36)}`;
+    const taken = await this.db.get<{ id: number }>(
+      `SELECT id FROM reseller_providers WHERE slug = ?`,
+      [slug]
+    );
+    if (taken) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
+
+    const existingCount = await this.db.get<{ total: number }>(
+      `SELECT COUNT(*) AS total FROM reseller_providers`
+    );
+    const makeDefault = input.makeDefault === true || !existingCount?.total;
+
+    if (makeDefault) {
+      await this.db.run(`UPDATE reseller_providers SET is_default = 0`);
+    }
+
+    const inserted = await this.db.run(
+      `INSERT INTO reseller_providers (
+         slug, name, provider, base_url, api_key_enc, api_key_hint,
+         is_default, is_enabled, store_enabled, markup_percent, request_timeout_ms,
+         sort_order, notes, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`,
+      [
+        slug,
+        name,
+        String(input.provider || 'bukkit-hosting').slice(0, 60) || 'bukkit-hosting',
+        baseUrl,
+        null,
+        null,
+        makeDefault ? 1 : 0,
+        input.enabled === false ? 0 : 1,
+        input.storeEnabled === false ? 0 : 1,
+        input.markupPercent === null || input.markupPercent === undefined
+          ? null
+          : Math.max(-90, Math.min(1000, Math.round(input.markupPercent))),
+        Math.max(2000, Math.min(120000, Math.round(input.requestTimeoutMs ?? 20000))),
+        (existingCount?.total || 0) + 1,
+        input.notes ? String(input.notes).slice(0, 500) : null,
+      ]
+    );
+
+    if (input.apiKey !== undefined && input.apiKey !== null && String(input.apiKey).trim()) {
+      await this.setProviderApiKey(inserted.lastID, String(input.apiKey));
+    }
+
+    await this.db.logActivity({
+      userId: input.actorId ?? null,
+      action: 'reseller_provider_create',
+      resourceType: 'reseller_provider',
+      resourceId: inserted.lastID,
+      details: { name, slug, baseUrl, makeDefault },
+    });
+
+    return this.getProvider(inserted.lastID);
+  }
+
+  /**
+   * Updates a provider's connection settings. The API key is only touched
+   * when `apiKey` is provided (a non-empty string sets it, `''` clears it).
+   */
+  public async updateProvider(
+    providerId: number,
+    patch: {
+      name?: string;
+      baseUrl?: string;
+      provider?: string;
+      enabled?: boolean;
+      storeEnabled?: boolean;
+      markupPercent?: number | null;
+      requestTimeoutMs?: number;
+      notes?: string | null;
+      isDefault?: boolean;
+      apiKey?: string | null;
+      actorId?: number | null;
+    }
+  ): Promise<ResellerProviderRow> {
+    const provider = await this.getProvider(providerId);
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const assign = (column: string, value: unknown) => {
+      sets.push(`${column} = ?`);
+      params.push(value);
+    };
+
+    if (patch.name !== undefined) {
+      const name = String(patch.name || '').trim().slice(0, 80);
+      if (!name) throw new ResellerError('A provider name is required.', 422, 'invalid_name');
+      assign('name', name);
+    }
+    if (patch.baseUrl !== undefined) assign('base_url', validateBaseUrl(patch.baseUrl));
+    if (patch.provider !== undefined) {
+      assign('provider', String(patch.provider || 'bukkit-hosting').slice(0, 60) || 'bukkit-hosting');
+    }
+    if (patch.enabled !== undefined) assign('is_enabled', patch.enabled ? 1 : 0);
+    if (patch.storeEnabled !== undefined) assign('store_enabled', patch.storeEnabled ? 1 : 0);
+    if (patch.markupPercent !== undefined) {
+      assign(
+        'markup_percent',
+        patch.markupPercent === null
+          ? null
+          : Math.max(-90, Math.min(1000, Math.round(Number(patch.markupPercent))))
+      );
+    }
+    if (patch.requestTimeoutMs !== undefined) {
+      assign('request_timeout_ms', Math.max(2000, Math.min(120000, Math.round(Number(patch.requestTimeoutMs)))));
+    }
+    if (patch.notes !== undefined) {
+      assign('notes', patch.notes === null ? null : String(patch.notes).slice(0, 500));
+    }
+
+    if (patch.isDefault === true && !provider.is_default) {
+      await this.db.run(`UPDATE reseller_providers SET is_default = 0`);
+      assign('is_default', 1);
+    }
+
+    if (sets.length) {
+      sets.push(`updated_at = datetime('now')`);
+      params.push(provider.id);
+      await this.db.run(`UPDATE reseller_providers SET ${sets.join(', ')} WHERE id = ?`, params);
+      this.clients.delete(provider.id);
+    }
+
+    if (patch.apiKey !== undefined && patch.apiKey !== null) {
+      await this.setProviderApiKey(provider.id, String(patch.apiKey));
+    }
+
+    await this.db.logActivity({
+      userId: patch.actorId ?? null,
+      action: 'reseller_provider_update',
+      resourceType: 'reseller_provider',
+      resourceId: provider.id,
+      details: { ...patch, apiKey: patch.apiKey ? '***' : patch.apiKey },
+    });
+
+    return this.getProvider(provider.id);
+  }
+
+  /**
+   * Deletes a provider. Refuses while it still has servers or open orders,
+   * so a removal can never orphan a customer's VPS.
+   */
+  public async deleteProvider(providerId: number, actorId?: number | null): Promise<void> {
+    const provider = await this.getProvider(providerId);
+    const servers = await this.db.get<{ total: number }>(
+      `SELECT COUNT(*) AS total FROM cloud_servers WHERE provider_id = ?`,
+      [provider.id]
+    );
+    if ((servers?.total || 0) > 0) {
+      throw new ResellerError(
+        `Provider "${provider.name}" still has ${servers?.total} provisioned server(s). Move or terminate them before removing the provider.`,
+        409,
+        'provider_in_use'
+      );
+    }
+    const openOrders = await this.db.get<{ total: number }>(
+      `SELECT COUNT(*) AS total FROM reseller_orders
+       WHERE provider_id = ? AND status IN ('pending', 'provisioning')`,
+      [provider.id]
+    );
+    if ((openOrders?.total || 0) > 0) {
+      throw new ResellerError(
+        `Provider "${provider.name}" still has ${openOrders?.total} open order(s). Resolve them first.`,
+        409,
+        'provider_in_use'
+      );
+    }
+
+    // Retire the catalogue before the row disappears. Without this the
+    // FK's ON DELETE SET NULL would leave the provider's plans looking
+    // "legacy" — still sellable, but with no upstream to fulfil them.
+    await this.db.run(
+      `UPDATE reseller_plans SET is_enabled = 0, is_visible = 0, updated_at = datetime('now')
+       WHERE provider_id = ?`,
+      [provider.id]
+    );
+    await this.db.run(`DELETE FROM reseller_os_images WHERE provider_id = ?`, [provider.id]);
+
+    await this.db.run(`DELETE FROM reseller_providers WHERE id = ?`, [provider.id]);
+    this.clients.delete(provider.id);
+
+    // Re-elect a default so the panel never ends up without one.
+    if (provider.is_default) {
+      const next = await this.db.get<{ id: number }>(
+        `SELECT id FROM reseller_providers ORDER BY is_enabled DESC, sort_order ASC, id ASC LIMIT 1`
+      );
+      if (next) {
+        await this.db.run(`UPDATE reseller_providers SET is_default = 1 WHERE id = ?`, [next.id]);
+      }
+    }
+
+    await this.db.logActivity({
+      userId: actorId ?? null,
+      action: 'reseller_provider_delete',
+      resourceType: 'reseller_provider',
+      resourceId: provider.id,
+      details: { name: provider.name, slug: provider.slug },
+    });
+  }
+
+  /** Sets the fallback provider used when callers do not specify one. */
+  public async setDefaultProvider(providerId: number): Promise<ResellerProviderRow> {
+    const provider = await this.getProvider(providerId);
+    await this.db.run(`UPDATE reseller_providers SET is_default = 0`);
+    await this.db.run(
+      `UPDATE reseller_providers SET is_default = 1, updated_at = datetime('now') WHERE id = ?`,
+      [provider.id]
+    );
+    return this.getProvider(provider.id);
+  }
+
+  /** Probes one provider without persisting anything but the probe result. */
+  public async probeProvider(providerId: number): Promise<ResellerStatus> {
+    return this.getStatus({ probeUpstream: true, providerId });
+  }
+
+  /** Aggregated health/rollup for every provider. */
+  /**
+   * Public, camelCase view of a provider row. Never includes the encrypted
+   * key blob — only a masked hint plus a boolean. Every provider endpoint
+   * (list, create, update, default) returns this shape so API clients and
+   * the admin console never have to switch between snake_case and camelCase.
+   */
+  public serializeProvider(provider: ResellerProviderRow): ProviderSummary {
+    return {
+      id: provider.id,
+      slug: provider.slug,
+      name: provider.name,
+      provider: provider.provider,
+      baseUrl: provider.base_url,
+      keyHint: provider.api_key_hint || '',
+      keyConfigured: !!this.resolveProviderApiKey(provider),
+      isDefault: !!provider.is_default,
+      enabled: !!provider.is_enabled,
+      storeEnabled: !!provider.store_enabled,
+      markupPercent: provider.markup_percent ?? null,
+      requestTimeoutMs: provider.request_timeout_ms,
+      lastSyncAt: provider.last_sync_at ?? null,
+      lastProbeAt: provider.last_probe_at ?? null,
+      lastBalanceCents: provider.last_balance_cents ?? null,
+      lastError: provider.last_error ?? null,
+      lastErrorAt: provider.last_error_at ?? null,
+      notes: provider.notes ?? null,
+      // Rollups are filled in by getProviderSummaries; a freshly saved
+      // provider starts empty.
+      plansTotal: 0,
+      plansEnabled: 0,
+      osImages: 0,
+      serversTotal: 0,
+      serversActive: 0,
+      ordersPending: 0,
+      monthlyRetailCents: 0,
+      monthlyCostCents: 0,
+      lowBalanceAlert: false,
+    };
+  }
+  public async getProviderSummaries(options: { probeUpstream?: boolean } = {}): Promise<ProviderSummary[]> {
+    const providers = await this.listProviders();
+    const cfg = await this.getSettings();
+    // Aggregate in one pass instead of per-provider round trips.
+    const [planAgg, osAgg, serverAgg, orderAgg] = await Promise.all([
+      this.db.all<{ provider_id: number; total: number; enabled: number }>(
+        `SELECT provider_id, COUNT(*) AS total,
+                SUM(CASE WHEN is_enabled = 1 THEN 1 ELSE 0 END) AS enabled
+         FROM reseller_plans GROUP BY provider_id`
+      ),
+      this.db.all<{ provider_id: number; total: number }>(
+        `SELECT provider_id, COUNT(*) AS total FROM reseller_os_images WHERE is_enabled = 1 GROUP BY provider_id`
+      ),
+      this.db.all<{ provider_id: number; total: number; active: number; retail: number; cost: number }>(
+        `SELECT provider_id, COUNT(*) AS total,
+                SUM(CASE WHEN upstream_state = 'active' AND suspended = 0 THEN 1 ELSE 0 END) AS active,
+                COALESCE(SUM(retail_cents), 0) AS retail,
+                COALESCE(SUM(cost_cents), 0) AS cost
+         FROM cloud_servers GROUP BY provider_id`
+      ),
+      this.db.all<{ provider_id: number; pending: number }>(
+        `SELECT provider_id, COUNT(*) AS pending FROM reseller_orders
+         WHERE status IN ('pending', 'provisioning') AND sandbox = 0 GROUP BY provider_id`
+      ),
+    ]);
+    const byId = <T extends { provider_id: number }>(rows: T[]) =>
+      new Map(rows.map((r) => [Number(r.provider_id), r]));
+    const planMap = byId(planAgg);
+    const osMap = byId(osAgg);
+    const serverMap = byId(serverAgg);
+    const orderMap = byId(orderAgg);
+
+    const summaries: ProviderSummary[] = [];
+    for (const provider of providers) {
+      const plans = planMap.get(provider.id);
+      const os = osMap.get(provider.id);
+      const servers = serverMap.get(provider.id);
+      const orders = orderMap.get(provider.id);
+      const keyConfigured = !!this.resolveProviderApiKey(provider);
+
+      let lastBalanceCents = provider.last_balance_cents;
+      let lastError = provider.last_error;
+      let lastErrorAt = provider.last_error_at;
+      let lastProbeAt = provider.last_probe_at;
+
+      if (options.probeUpstream && keyConfigured && provider.is_enabled) {
+        try {
+          const client = await this.getClient(provider.id);
+          const account = await client.getAccount();
+          lastBalanceCents = account.balance ? moneyToCents(account.balance.amount) : null;
+          lastProbeAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+          lastError = null;
+          lastErrorAt = null;
+          await this.db.run(
+            `UPDATE reseller_providers SET last_probe_at = ?, last_balance_cents = ?,
+               last_error = NULL, last_error_at = NULL WHERE id = ?`,
+            [lastProbeAt, lastBalanceCents, provider.id]
+          );
+        } catch (err) {
+          const e = toResellerError(err);
+          lastError = e.message;
+          lastErrorAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+          await this.db.run(
+            `UPDATE reseller_providers SET last_probe_at = ?, last_error = ?, last_error_at = ?
+             WHERE id = ?`,
+            [lastErrorAt, lastError, lastErrorAt, provider.id]
+          );
+        }
+      }
+
+      const lowBalanceAlert =
+        lastBalanceCents !== null &&
+        lastBalanceCents !== undefined &&
+        lastBalanceCents < cfg.reseller_low_balance_alert_cents;
+
+      const summary = this.serializeProvider(provider);
+      summary.lastProbeAt = lastProbeAt ?? null;
+      summary.lastBalanceCents = lastBalanceCents ?? null;
+      summary.lastError = lastError ?? null;
+      summary.lastErrorAt = lastErrorAt ?? null;
+      summary.plansTotal = plans?.total || 0;
+      summary.plansEnabled = plans?.enabled || 0;
+      summary.osImages = os?.total || 0;
+      summary.serversTotal = servers?.total || 0;
+      summary.serversActive = servers?.active || 0;
+      summary.ordersPending = orders?.pending || 0;
+      summary.monthlyRetailCents = servers?.retail || 0;
+      summary.monthlyCostCents = servers?.cost || 0;
+      summary.lowBalanceAlert = lowBalanceAlert;
+      summaries.push(summary);
+    }
+    return summaries;
+  }
+
+  // -------------------------------------------------------------------------
+  // Providers (multiple upstream reseller accounts)
+  // -------------------------------------------------------------------------
+
+  /** Every configured upstream provider, default first. */
+  public async listProviders(options: { enabledOnly?: boolean } = {}): Promise<ResellerProviderRow[]> {
+    const where = options.enabledOnly ? 'WHERE is_enabled = 1' : '';
+    return this.db.all<ResellerProviderRow>(
+      `SELECT * FROM reseller_providers ${where}
+       ORDER BY is_default DESC, sort_order ASC, id ASC`
+    );
+  }
+
+  public async getProvider(providerId: number): Promise<ResellerProviderRow> {
+    const row = await this.db.get<ResellerProviderRow>(
+      `SELECT * FROM reseller_providers WHERE id = ?`,
+      [providerId]
+    );
+    if (!row) throw new ResellerError('Provider not found.', 404, 'provider_not_found');
+    return row;
+  }
+
+  /**
+   * Resolves a provider by id, falling back to the panel default. `null`
+   * means "let the panel decide", which keeps single-provider installs and
+   * older API clients working unchanged.
+   */
+  public async resolveProvider(providerId?: number | null): Promise<ResellerProviderRow> {
+    if (providerId) return this.getProvider(providerId);
+    return this.getDefaultProvider();
+  }
+
+  /** The provider used when a caller does not name one. */
+  public async getDefaultProvider(): Promise<ResellerProviderRow> {
+    const row =
+      (await this.db.get<ResellerProviderRow>(
+        `SELECT * FROM reseller_providers WHERE is_default = 1 ORDER BY is_enabled DESC, id ASC LIMIT 1`
+      )) ||
+      (await this.db.get<ResellerProviderRow>(
+        `SELECT * FROM reseller_providers WHERE is_enabled = 1 ORDER BY sort_order ASC, id ASC LIMIT 1`
+      )) ||
+      (await this.db.get<ResellerProviderRow>(
+        `SELECT * FROM reseller_providers ORDER BY id ASC LIMIT 1`
+      ));
+    if (!row) {
+      throw new ResellerError(
+        'No upstream reseller provider is configured yet. Add one in Admin → Reseller & Cloud → Providers.',
+        503,
+        'reseller_not_configured'
+      );
+    }
+    return row;
+  }
+
+  /** Decrypts a provider's API key, falling back to `RESELLER_API_KEY` for the default one. */
+  public resolveProviderApiKey(provider: Pick<ResellerProviderRow, 'api_key_enc' | 'is_default'>): string {
+    if (provider.api_key_enc) {
       try {
-        const plain = decryptSecret(cfg.reseller_api_key_enc);
+        const plain = decryptSecret(provider.api_key_enc);
         if (plain) return plain;
       } catch {
         // Fall through to env — e.g. DB copied from another host.
       }
     }
-    return String(process.env.RESELLER_API_KEY || '').trim();
+    return provider.is_default ? String(process.env.RESELLER_API_KEY || '').trim() : '';
+  }
+
+  /** Whether an upstream call may be made for this provider right now. */
+  public async isProviderReady(
+    providerId?: number | null
+  ): Promise<{ ready: boolean; enabled: boolean; reason: string | null; provider: ResellerProviderRow | null }> {
+    let provider: ResellerProviderRow;
+    try {
+      provider = await this.resolveProvider(providerId);
+    } catch (err) {
+      return { ready: false, enabled: false, reason: toResellerError(err).message, provider: null };
+    }
+    if (!this.resolveProviderApiKey(provider)) {
+      return {
+        ready: false,
+        enabled: !!provider.is_enabled,
+        reason: `No API key configured for provider "${provider.name}".`,
+        provider,
+      };
+    }
+    if (!provider.is_enabled) {
+      return {
+        ready: false,
+        enabled: false,
+        reason: `Provider "${provider.name}" is disabled.`,
+        provider,
+      };
+    }
+    return { ready: true, enabled: true, reason: null, provider };
   }
 
   /**
-   * Returns a configured client, rebuilding it only when base URL / key /
-   * timeout changed. Callers that need to know whether a key exists should
-   * check `isConfigured()`.
+   * Returns a configured client for one provider, rebuilding it only when
+   * its base URL / key / timeout changed.
    */
-  public async getClient(): Promise<ResellerApiClient> {
-    const cfg = await this.getSettings();
-    const apiKey = await this.resolveApiKey(cfg);
-    const baseUrl =
-      cfg.reseller_api_base_url ||
-      process.env.RESELLER_API_BASE_URL ||
-      'https://bukkit-hosting.eu/api/v2';
-    const fingerprint = `${baseUrl}|${apiKey.length}:${apiKey.slice(-4)}|${cfg.reseller_request_timeout_ms}`;
+  public async getClient(providerId?: number | null): Promise<ResellerApiClient> {
+    const provider = await this.resolveProvider(providerId);
+    const apiKey = this.resolveProviderApiKey(provider);
+    const fingerprint = `${provider.base_url}|${apiKey.length}:${apiKey.slice(-4)}|${provider.request_timeout_ms}|${provider.id}`;
 
-    if (this.client && this.clientFingerprint === fingerprint) return this.client;
+    const cached = this.clients.get(provider.id);
+    if (cached && cached.fingerprint === fingerprint) return cached.client;
 
-    this.client = new ResellerApiClient({
-      baseUrl,
+    const client = new ResellerApiClient({
+      baseUrl: provider.base_url,
       apiKey,
-      timeoutMs: cfg.reseller_request_timeout_ms,
+      timeoutMs: provider.request_timeout_ms,
       maxRetries: 2,
       userAgent: 'TGVPANEL/3.0 reseller-integration',
-      onLog: (entry) => this.writeApiLog(entry),
+      onLog: (entry) => this.writeApiLog(entry, provider),
     });
-    this.clientFingerprint = fingerprint;
-    return this.client;
+    this.clients.set(provider.id, { fingerprint, client });
+    return client;
   }
 
+  /** Backwards-compatible readiness probe for the default provider. */
   public async isReady(): Promise<{ ready: boolean; enabled: boolean; reason: string | null }> {
-    const cfg = await this.getSettings();
-    const key = await this.resolveApiKey(cfg);
-    if (!key) {
-      return {
-        ready: false,
-        enabled: cfg.reseller_enabled,
-        reason: 'No upstream API key configured.',
-      };
-    }
-    if (!cfg.reseller_enabled) {
-      return { ready: false, enabled: false, reason: 'Reseller integration is disabled.' };
-    }
-    return { ready: true, enabled: true, reason: null };
+    const r = await this.isProviderReady(null);
+    return { ready: r.ready, enabled: r.enabled, reason: r.reason };
   }
 
   /** Guards every upstream-touching operation. */
-  private async requireReady(): Promise<ResellerApiClient> {
-    const ready = await this.isReady();
+  private async requireReady(providerId?: number | null): Promise<ResellerApiClient> {
+    const ready = await this.isProviderReady(providerId);
     if (!ready.ready) {
       throw new ResellerError(
         ready.reason || 'Reseller integration is not ready.',
         503,
-        'reseller_not_configured'
+        'reseller_not_configured',
+        ready.provider ? { providerId: ready.provider.id } : {}
       );
     }
-    return this.getClient();
+    return this.getClient(ready.provider?.id ?? null);
   }
 
-  private async writeApiLog(entry: ResellerApiLogEntry): Promise<void> {
+  /** Resolves the provider behind a stored order/server row. */
+  private async providerIdForRow(row: { provider_id?: number | null }): Promise<number | null> {
+    if (row && row.provider_id) return row.provider_id;
+    const fallback = await this.getDefaultProvider().catch(() => null);
+    return fallback ? fallback.id : null;
+  }
+
+  private async writeApiLog(entry: ResellerApiLogEntry, provider?: ResellerProviderRow | null): Promise<void> {
     try {
       await this.db.run(
         `INSERT INTO reseller_api_logs
-           (provider, method, endpoint, status_code, state, error_code, duration_ms,
+           (provider, provider_id, method, endpoint, status_code, state, error_code, duration_ms,
             request_id, idempotency_key, request_body, response_body, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
         [
-          'bukkit-hosting',
+          provider?.provider || 'bukkit-hosting',
+          provider?.id ?? null,
           entry.method,
           entry.endpoint,
           entry.statusCode,
@@ -711,12 +1279,16 @@ export class ResellerService {
     }
   }
 
-  public async listApiLogs(limit = 50): Promise<Record<string, unknown>[]> {
+  public async listApiLogs(limit = 50, providerId?: number | null): Promise<Record<string, unknown>[]> {
+    const params: unknown[] = [];
+    const where = providerId ? 'WHERE provider_id = ?' : '';
+    if (providerId) params.push(providerId);
+    params.push(Math.max(1, Math.min(500, limit)));
     const rows = await this.db.all(
-      `SELECT id, method, endpoint, status_code, state, error_code, duration_ms,
+      `SELECT id, provider_id, provider, method, endpoint, status_code, state, error_code, duration_ms,
               request_id, idempotency_key, created_at, request_body, response_body
-       FROM reseller_api_logs ORDER BY id DESC LIMIT ?`,
-      [Math.max(1, Math.min(500, limit))]
+       FROM reseller_api_logs ${where} ORDER BY id DESC LIMIT ?`,
+      params
     );
     return rows;
   }
@@ -725,17 +1297,46 @@ export class ResellerService {
   // Status / health
   // -------------------------------------------------------------------------
 
-  public async getStatus(options: { probeUpstream?: boolean } = {}): Promise<ResellerStatus> {
+  /**
+   * Health + aggregates. Scoped to one provider by default (the default
+   * provider) and always accompanied by a summary of every provider, so the
+   * admin console can show the whole reselling business at a glance.
+   */
+  public async getStatus(
+    options: { probeUpstream?: boolean; providerId?: number | null } = {}
+  ): Promise<ResellerStatus> {
     const cfg = await this.getSettings();
-    const apiKey = await this.resolveApiKey(cfg);
+    const provider = await this.resolveProvider(options.providerId).catch(() => null);
+    const apiKey = provider ? this.resolveProviderApiKey(provider) : '';
+    const scope = options.providerId ? ' WHERE provider_id = ?' : '';
+    const scoped = options.providerId ? [options.providerId] : [];
+    const providerEnabled = provider ? !!provider.is_enabled && cfg.reseller_enabled : false;
+    const providers = await this.getProviderSummaries({ probeUpstream: options.probeUpstream });
 
     const status: ResellerStatus = {
-      enabled: cfg.reseller_enabled,
+      enabled: providerEnabled,
       configured: apiKey.length > 0,
-      storeEnabled: cfg.reseller_store_enabled,
-      provider: cfg.reseller_provider,
-      baseUrl: cfg.reseller_api_base_url,
-      keyHint: cfg.reseller_api_key_hint || (apiKey ? `${apiKey.slice(0, 6)}…${apiKey.slice(-4)}` : ''),
+      storeEnabled: provider ? !!provider.store_enabled && !!provider.is_enabled : false,
+      provider: provider?.provider || cfg.reseller_provider,
+      baseUrl: provider?.base_url || cfg.reseller_api_base_url,
+      keyHint:
+        provider?.api_key_hint ||
+        (apiKey ? `${apiKey.slice(0, 6)}…${apiKey.slice(-4)}` : ''),
+      providerId: provider?.id ?? null,
+      providerName: provider?.name ?? null,
+      providers,
+      totals: {
+        providers: providers.length,
+        enabled: providers.filter((p) => p.enabled).length,
+        configured: providers.filter((p) => p.keyConfigured).length,
+        plansEnabled: providers.reduce((a, p) => a + p.plansEnabled, 0),
+        serversTotal: providers.reduce((a, p) => a + p.serversTotal, 0),
+        monthlyMarginCents: providers.reduce(
+          (a, p) => a + (p.monthlyRetailCents - p.monthlyCostCents),
+          0
+        ),
+        pendingOrders: providers.reduce((a, p) => a + p.ordersPending, 0),
+      },
       upstream: {
         reachable: false,
         checkedAt: null,
@@ -754,7 +1355,7 @@ export class ResellerService {
         plansEnabled: 0,
         plansVisible: 0,
         osImages: 0,
-        lastSyncAt: cfg.reseller_last_sync_at || null,
+        lastSyncAt: provider?.last_sync_at || cfg.reseller_last_sync_at || null,
         cpuFamilies: [],
       },
       fleet: {
@@ -777,14 +1378,20 @@ export class ResellerService {
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN is_enabled = 1 THEN 1 ELSE 0 END) AS enabled,
                 SUM(CASE WHEN is_enabled = 1 AND is_visible = 1 THEN 1 ELSE 0 END) AS visible
-         FROM reseller_plans`
+         FROM reseller_plans${scope}`,
+        scoped
       ),
       this.db.get<{ total: number }>(
-        `SELECT COUNT(*) AS total FROM reseller_os_images WHERE is_enabled = 1`
+        `SELECT COUNT(*) AS total FROM reseller_os_images WHERE is_enabled = 1${
+          options.providerId ? ' AND provider_id = ?' : ''
+        }`,
+        scoped
       ),
       this.db.all<{ cpu: string; plans: number }>(
         `SELECT COALESCE(cpu_family, 'other') AS cpu, COUNT(*) AS plans
-         FROM reseller_plans WHERE is_enabled = 1 GROUP BY cpu_family ORDER BY plans DESC`
+         FROM reseller_plans WHERE is_enabled = 1${options.providerId ? ' AND provider_id = ?' : ''}
+         GROUP BY cpu_family ORDER BY plans DESC`,
+        scoped
       ),
       this.db.get<{
         total: number;
@@ -803,7 +1410,8 @@ export class ResellerService {
                           AND datetime(expires_at) <= datetime('now', '+7 days') THEN 1 ELSE 0 END) AS expiring,
                 COALESCE(SUM(retail_cents), 0) AS retail,
                 COALESCE(SUM(cost_cents), 0) AS cost
-         FROM cloud_servers`
+         FROM cloud_servers${scope}`,
+        scoped
       ),
       this.db.get<{
         total: number;
@@ -819,7 +1427,8 @@ export class ResellerService {
                 SUM(CASE WHEN status = 'provisioned' THEN 1 ELSE 0 END) AS provisioned,
                 SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
                 SUM(CASE WHEN created_at >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS last24h
-         FROM reseller_orders WHERE sandbox = 0`
+         FROM reseller_orders WHERE sandbox = 0${options.providerId ? ' AND provider_id = ?' : ''}`,
+        scoped
       ),
       this.db.get<{ total: number; customers: number }>(
         `SELECT COALESCE(SUM(bal), 0) AS total,
@@ -857,9 +1466,9 @@ export class ResellerService {
     status.wallet.totalBalanceCents = walletAgg?.total || 0;
     status.wallet.customersWithCredit = walletAgg?.customers || 0;
 
-    if (options.probeUpstream && apiKey) {
+    if (options.probeUpstream && provider && apiKey) {
       try {
-        const client = await this.getClient();
+        const client = await this.getClient(provider.id);
         const account = await client.getAccount();
         status.upstream.reachable = true;
         status.upstream.checkedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -867,12 +1476,16 @@ export class ResellerService {
         status.upstream.balanceCents = account.balance ? moneyToCents(account.balance.amount) : null;
         status.upstream.currency = account.balance?.currency || 'EUR';
         status.upstream.rateLimit = client.lastRateLimit;
-        await this.setSetting('reseller_upstream_account_id', account.userId || '');
-        if (status.upstream.balanceCents !== null) {
-          await this.setSetting(
-            'reseller_upstream_balance_cents',
-            String(status.upstream.balanceCents)
-          );
+        await this.db.run(
+          `UPDATE reseller_providers SET last_probe_at = ?, last_balance_cents = ?,
+             last_error = NULL, last_error_at = NULL WHERE id = ?`,
+          [status.upstream.checkedAt, status.upstream.balanceCents, provider.id]
+        );
+        if (provider.is_default) {
+          await this.setSetting('reseller_upstream_account_id', account.userId || '');
+          if (status.upstream.balanceCents !== null) {
+            await this.setSetting('reseller_upstream_balance_cents', String(status.upstream.balanceCents));
+          }
         }
         try {
           const resellerInfo = await client.getResellerInfo();
@@ -892,16 +1505,23 @@ export class ResellerService {
         status.upstream.checkedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
         status.upstream.error = e.message;
         status.upstream.errorCode = e.code;
+        await this.db.run(
+          `UPDATE reseller_providers SET last_probe_at = ?, last_error = ?, last_error_at = ?
+           WHERE id = ?`,
+          [status.upstream.checkedAt, e.message.slice(0, 500), status.upstream.checkedAt, provider.id]
+        ).catch(() => undefined);
       }
     } else if (!apiKey) {
-      status.upstream.error = 'No upstream API key configured.';
+      status.upstream.error = provider
+        ? `No upstream API key configured for "${provider.name}".`
+        : 'No upstream reseller provider configured.';
       status.upstream.errorCode = 'missing_api_key';
     }
 
-    const cachedBalance = cfg.reseller_upstream_balance_cents
-      ? parseInt(cfg.reseller_upstream_balance_cents, 10)
-      : null;
-    const balanceForAlert = status.upstream.balanceCents ?? (Number.isFinite(cachedBalance) ? cachedBalance : null);
+    const cachedBalance = provider?.last_balance_cents ?? (
+      cfg.reseller_upstream_balance_cents ? parseInt(cfg.reseller_upstream_balance_cents, 10) : null
+    );
+    const balanceForAlert = status.upstream.balanceCents ?? (Number.isFinite(cachedBalance as number) ? (cachedBalance as number) : null);
     status.lowBalanceAlert =
       balanceForAlert !== null && balanceForAlert < cfg.reseller_low_balance_alert_cents;
 
@@ -923,7 +1543,11 @@ export class ResellerService {
    * Newly discovered plans land **disabled** — enabling what customers can
    * buy is an explicit reseller decision.
    */
-  public async syncCatalogue(options: { actorId?: number | null } = {}): Promise<{
+  public async syncCatalogue(
+    options: { actorId?: number | null; providerId?: number | null } = {}
+  ): Promise<{
+    providerId: number;
+    providerName: string;
     plansUpserted: number;
     plansNew: number;
     plansDisabled: number;
@@ -931,9 +1555,10 @@ export class ResellerService {
     cpuFamilies: string[];
     upstreamBalanceCents: number | null;
   }> {
-    const client = await this.requireReady();
+    const provider = await this.resolveProvider(options.providerId);
+    const client = await this.requireReady(provider.id);
     const cfg = await this.getSettings();
-    const markupPct = cfg.reseller_default_markup_percent;
+    const markupPct = provider.markup_percent ?? cfg.reseller_default_markup_percent;
 
     const [plans, osList] = await Promise.all([client.listKvmPlans(), client.listKvmOs()]);
 
@@ -949,12 +1574,15 @@ export class ResellerService {
       const costCents = moneyToCents(plan.finalPrice ?? plan.price);
       const listCents = moneyToCents(plan.price);
       const derivedRetail = applyMarkup(costCents, markupPct);
-      const slug = packagePlanSlug(plan.name, plan.id);
+      const baseSlug = packagePlanSlug(plan.name, plan.id);
+      const slug = provider.is_default ? baseSlug : `${provider.slug}-${baseSlug}`.slice(0, 120);
       sortIndex += 1;
 
       const existing = await this.db.get<ResellerPlanRow>(
-        `SELECT * FROM reseller_plans WHERE upstream_plan_id = ? AND kind = 'package' LIMIT 1`,
-        [plan.id]
+        `SELECT * FROM reseller_plans
+         WHERE upstream_plan_id = ? AND kind = 'package' AND provider_id = ?
+         LIMIT 1`,
+        [plan.id, provider.id]
       );
 
       if (existing) {
@@ -1008,16 +1636,17 @@ export class ResellerService {
       } else {
         await this.db.run(
           `INSERT INTO reseller_plans (
-             provider, upstream_plan_id, kind, slug, display_name, description,
+             provider_id, provider, upstream_plan_id, kind, slug, display_name, description,
              cpu_family, cpu_label, cores, memory_gb, disk_gb, ipv4_count, ipv6_count,
              connection_gbit, duration_months, cost_cents, cost_renew_cents,
              retail_cents, retail_renew_cents, setup_cents, currency,
              is_enabled, is_visible, is_popular, sort_order, stock_state,
              upstream_available, upstream_exclusive, upstream_discount_percent,
              upstream_discount_ends_at, upstream_raw, last_synced_at, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),datetime('now'))`,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),datetime('now'))`,
           [
-            cfg.reseller_provider,
+            provider.id,
+            provider.provider,
             plan.id,
             'package',
             slug,
@@ -1062,8 +1691,8 @@ export class ResellerService {
       osSort += 1;
       const family = osFamily(image.id, image.name, !!image.windows);
       const existing = await this.db.get<ResellerOsRow>(
-        `SELECT * FROM reseller_os_images WHERE provider = ? AND upstream_os_id = ? LIMIT 1`,
-        [cfg.reseller_provider, image.id]
+        `SELECT * FROM reseller_os_images WHERE provider_id = ? AND upstream_os_id = ? LIMIT 1`,
+        [provider.id, image.id]
       );
       if (existing) {
         await this.db.run(
@@ -1083,11 +1712,12 @@ export class ResellerService {
       } else {
         await this.db.run(
           `INSERT INTO reseller_os_images (
-             provider, upstream_os_id, display_name, family, is_windows, min_disk_gb,
+             provider_id, provider, upstream_os_id, display_name, family, is_windows, min_disk_gb,
              is_enabled, icon, sort_order, last_synced_at, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`,
+           VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`,
           [
-            cfg.reseller_provider,
+            provider.id,
+            provider.provider,
             image.id,
             image.name,
             family,
@@ -1108,23 +1738,36 @@ export class ResellerService {
     try {
       const balance = await client.getBalance();
       upstreamBalanceCents = moneyToCents(balance.amount);
-      await this.setSetting('reseller_upstream_balance_cents', String(upstreamBalanceCents));
-      if (balance.currency) await this.setSetting('reseller_provider', cfg.reseller_provider);
+      await this.db.run(
+        `UPDATE reseller_providers SET last_balance_cents = ? WHERE id = ?`,
+        [upstreamBalanceCents, provider.id]
+      );
+      if (provider.is_default) {
+        await this.setSetting('reseller_upstream_balance_cents', String(upstreamBalanceCents));
+        if (balance.currency) await this.setSetting('reseller_provider', provider.provider);
+      }
     } catch {
       // Balance is a nice-to-have; catalogue sync already succeeded.
     }
 
-    await this.setSetting('reseller_last_sync_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
+    const syncedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    await this.db.run(
+      `UPDATE reseller_providers SET last_sync_at = ? WHERE id = ?`,
+      [syncedAt, provider.id]
+    );
+    if (provider.is_default) await this.setSetting('reseller_last_sync_at', syncedAt);
 
     await this.db.logActivity({
       userId: options.actorId ?? null,
       action: 'reseller_catalogue_sync',
-      resourceType: 'reseller',
-      resourceId: cfg.reseller_provider,
-      details: { plansUpserted, plansNew, osUpserted, families: Array.from(families) },
+      resourceType: 'reseller_provider',
+      resourceId: provider.id,
+      details: { plansUpserted, plansNew, osUpserted, families: Array.from(families), provider: provider.name },
     });
 
     return {
+      providerId: provider.id,
+      providerName: provider.name,
       plansUpserted,
       plansNew,
       plansDisabled,
@@ -1135,8 +1778,8 @@ export class ResellerService {
   }
 
   /** Fetches live configurator limits/prices (not persisted; priced on demand). */
-  public async getConfigurator(cpu?: string): Promise<UpstreamKvmConfigurator[]> {
-    const client = await this.requireReady();
+  public async getConfigurator(cpu?: string, providerId?: number | null): Promise<UpstreamKvmConfigurator[]> {
+    const client = await this.requireReady(providerId);
     return client.getKvmConfigurator(cpu);
   }
 
@@ -1149,8 +1792,10 @@ export class ResellerService {
     ipv6?: number;
     voucher?: string;
     markupPercent?: number | null;
+    providerId?: number | null;
   }): Promise<{ upstream: UpstreamKvmConfiguratorPrice; costCents: number; retailCents: number; retailRenewCents: number }> {
-    const client = await this.requireReady();
+    const provider = await this.resolveProvider(params.providerId);
+    const client = await this.requireReady(provider.id);
     const cfg = await this.getSettings();
     const upstream = await client.getKvmConfiguratorPrice({
       cpu: params.cpu,
@@ -1164,17 +1809,30 @@ export class ResellerService {
     const costCents = moneyToCents(upstream.pricing?.orderPrice ?? upstream.pricing?.price);
     const markup =
       params.markupPercent === null || params.markupPercent === undefined
-        ? cfg.reseller_default_markup_percent
+        ? provider.markup_percent ?? cfg.reseller_default_markup_percent
         : params.markupPercent;
     const retailCents = applyMarkup(costCents, markup);
     const renewCents = applyMarkup(moneyToCents(upstream.pricing?.renewPrice ?? upstream.pricing?.price), markup);
     return { upstream, costCents, retailCents, retailRenewCents: renewCents };
   }
 
-  public async listOsImages(options: { enabledOnly?: boolean } = {}): Promise<ResellerOsRow[]> {
-    const where = options.enabledOnly === false ? '' : 'WHERE is_enabled = 1';
+  public async listOsImages(
+    options: { enabledOnly?: boolean; providerId?: number | null; storeProvidersOnly?: boolean } = {}
+  ): Promise<ResellerOsRow[]> {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    if (options.enabledOnly !== false) clauses.push('o.is_enabled = 1');
+    if (options.providerId) {
+      clauses.push('o.provider_id = ?');
+      params.push(options.providerId);
+    } else if (options.storeProvidersOnly) {
+      // Storefront: only OS images offered by providers that are actually selling.
+      clauses.push('o.provider_id IN (SELECT id FROM reseller_providers WHERE is_enabled = 1 AND store_enabled = 1)');
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     return this.db.all<ResellerOsRow>(
-      `SELECT * FROM reseller_os_images ${where} ORDER BY sort_order, display_name`
+      `SELECT o.* FROM reseller_os_images o ${where} ORDER BY o.sort_order, o.display_name, o.id`,
+      params
     );
   }
 
@@ -1182,22 +1840,33 @@ export class ResellerService {
     enabledOnly?: boolean;
     visibleOnly?: boolean;
     cpu?: string;
+    providerId?: number | null;
+    storeProvidersOnly?: boolean;
   } = {}): Promise<ResellerPlanRow[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (options.enabledOnly !== false) {
-      clauses.push('is_enabled = 1');
+      clauses.push('p.is_enabled = 1');
     }
     if (options.visibleOnly) {
-      clauses.push('is_visible = 1');
+      clauses.push('p.is_visible = 1');
     }
     if (options.cpu) {
-      clauses.push('LOWER(cpu_family) = LOWER(?)');
+      clauses.push('LOWER(p.cpu_family) = LOWER(?)');
       params.push(options.cpu);
+    }
+    if (options.providerId) {
+      clauses.push('p.provider_id = ?');
+      params.push(options.providerId);
+    } else if (options.storeProvidersOnly) {
+      // Only plans whose provider is live and selling are storefront-visible.
+      clauses.push(
+        'p.provider_id IN (SELECT id FROM reseller_providers WHERE is_enabled = 1 AND store_enabled = 1)'
+      );
     }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     return this.db.all<ResellerPlanRow>(
-      `SELECT * FROM reseller_plans ${where} ORDER BY sort_order, retail_cents, id`,
+      `SELECT p.* FROM reseller_plans p ${where} ORDER BY p.sort_order, p.retail_cents, p.id`,
       params
     );
   }
@@ -1205,6 +1874,7 @@ export class ResellerService {
   /** Customer-facing catalogue grouped by CPU family. */
   public async getStoreCatalogue(): Promise<{
     enabled: boolean;
+    providers: Array<{ id: number; name: string; isDefault: boolean; storeEnabled: boolean }>;
     groups: Array<{ cpu: string; label: string; plans: StorePlan[] }>;
     osImages: Array<{
       id: string;
@@ -1220,30 +1890,53 @@ export class ResellerService {
     currency: string;
   }> {
     const cfg = await this.getSettings();
+    // The storefront aggregates every provider that is enabled and has its
+    // storefront open, so customers see one catalogue regardless of which
+    // upstream API a plan is fulfilled from.
+    const providers = await this.listProviders({ enabledOnly: true });
+    const providersById = new Map(providers.map((p) => [p.id, p]));
+    const sellingProviders = providers.filter((p) => p.store_enabled);
     const plans = await this.listPlans({ enabledOnly: true, visibleOnly: true });
     const osImages = await this.listOsImages({ enabledOnly: true });
+    const storeOpen = cfg.reseller_enabled && cfg.reseller_store_enabled;
 
     const groups = new Map<string, StorePlan[]>();
     for (const plan of plans) {
+      // A plan is only sellable while its provider exists and is selling.
+      const owner = plan.provider_id ? providersById.get(Number(plan.provider_id)) : null;
+      if (!owner || !owner.store_enabled) continue;
       const cpu = String(plan.cpu_family || 'other').toLowerCase();
       if (!groups.has(cpu)) groups.set(cpu, []);
-      groups.get(cpu)!.push(toStorePlan(plan));
+      const storePlan = toStorePlan(plan);
+      storePlan.providerId = plan.provider_id ?? null;
+      storePlan.providerName = owner?.name || null;
+      groups.get(cpu)!.push(storePlan);
     }
 
     const ordered = Array.from(groups.entries())
       .map(([cpu, list]) => ({ cpu, label: cpuFamilyLabel(cpu, list[0]?.displayName), plans: list }))
       .sort((a, b) => a.label.localeCompare(b.label));
 
+    // OS images are only useful if at least one selling provider offers them.
+    const sellingIds = new Set(sellingProviders.map((p) => p.id));
+    const usableOs = osImages.filter((o) => !o.provider_id || sellingIds.has(Number(o.provider_id)));
+
     return {
-      enabled: cfg.reseller_enabled && cfg.reseller_store_enabled,
+      enabled: storeOpen && sellingProviders.length > 0,
       groups: ordered,
-      osImages: osImages.map((o) => ({
+      osImages: usableOs.map((o) => ({
         id: o.upstream_os_id,
         name: o.display_name,
         family: o.family,
         windows: !!o.is_windows,
         minDiskGb: o.min_disk_gb,
         icon: o.icon || osIcon(o.family),
+      })),
+      providers: providers.map((p) => ({
+        id: p.id,
+        name: p.name,
+        isDefault: !!p.is_default,
+        storeEnabled: !!p.store_enabled,
       })),
       configuratorEnabled: cfg.reseller_allow_configurator,
       autoRenewDefault: cfg.reseller_auto_renew_default,
@@ -1320,8 +2013,9 @@ export class ResellerService {
     setupCents?: number;
     enable?: boolean;
     actorId?: number | null;
+    providerId?: number | null;
   }): Promise<ResellerPlanRow> {
-    const cfg = await this.getSettings();
+    const provider = await this.resolveProvider(input.providerId);
     const quote = await this.getConfiguratorPrice({
       cpu: input.cpu,
       cores: input.cores,
@@ -1330,9 +2024,11 @@ export class ResellerService {
       ipv4: input.ipv4,
       ipv6: input.ipv6,
       markupPercent: input.markupPercent ?? null,
+      providerId: provider.id,
     });
 
-    const slug = configPlanSlug(input.cpu, input.cores, input.memory, input.disk);
+    const baseSlug = configPlanSlug(input.cpu, input.cores, input.memory, input.disk);
+    const slug = provider.is_default ? baseSlug : `${provider.slug}-${baseSlug}`.slice(0, 120);
     const existing = await this.db.get<ResellerPlanRow>(
       `SELECT * FROM reseller_plans WHERE slug = ? LIMIT 1`,
       [slug]
@@ -1351,15 +2047,16 @@ export class ResellerService {
 
     const result = await this.db.run(
       `INSERT INTO reseller_plans (
-         provider, upstream_plan_id, kind, slug, display_name, description, cpu_family, cpu_label,
+         provider_id, provider, upstream_plan_id, kind, slug, display_name, description, cpu_family, cpu_label,
          cores, memory_gb, disk_gb, ipv4_count, ipv6_count, connection_gbit, duration_months,
          cost_cents, cost_renew_cents, retail_cents, retail_renew_cents, setup_cents, currency,
          is_enabled, is_visible, is_popular, sort_order, stock_state, upstream_available,
          upstream_exclusive, upstream_discount_percent, upstream_raw, last_synced_at,
          created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),datetime('now'))`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),datetime('now'))`,
       [
-        cfg.reseller_provider,
+        provider.id,
+        provider.provider,
         null,
         'config',
         slug,
@@ -1410,7 +2107,14 @@ export class ResellerService {
       action: 'reseller_plan_create',
       resourceType: 'reseller_plan',
       resourceId: result.lastID,
-      details: { slug, cpu: input.cpu, cores: input.cores, memory: input.memory, disk: input.disk },
+      details: {
+        slug,
+        providerId: provider.id,
+        cpu: input.cpu,
+        cores: input.cores,
+        memory: input.memory,
+        disk: input.disk,
+      },
     });
 
     const created = await this.db.get<ResellerPlanRow>(
@@ -1545,7 +2249,6 @@ export class ResellerService {
    * `retryOrder()` — the persisted idempotency key prevents double purchase.
    */
   public async placeOrder(input: PlaceOrderInput): Promise<OrderOutcome> {
-    const client = await this.requireReady();
     const cfg = await this.getSettings();
 
     if (!cfg.reseller_store_enabled && !input.placedBy) {
@@ -1572,6 +2275,9 @@ export class ResellerService {
     let costCents = 0;
     let retailCents = 0;
     let setupCents = 0;
+    /** Resolved below from the plan (or explicitly) — decides which upstream API is called. */
+    let provider: ResellerProviderRow | null = null;
+    let client: ResellerApiClient;
 
     if (input.config) {
       if (!cfg.reseller_allow_configurator) {
@@ -1591,6 +2297,7 @@ export class ResellerService {
       if (!cpuFamily || !cores || !memoryGb || !diskGb) {
         throw new ResellerError('cpu, cores, memory and disk are required.', 422, 'invalid_config');
       }
+      provider = await this.resolveProvider(input.providerId);
       const quote = await this.getConfiguratorPrice({
         cpu: cpuFamily,
         cores,
@@ -1599,6 +2306,7 @@ export class ResellerService {
         ipv4: ipv4Count,
         ipv6: ipv6Count,
         voucher: input.voucher || undefined,
+        providerId: provider.id,
       });
       if (!quote.upstream.available) {
         throw new ResellerError('This configuration is not available right now.', 409, 'not_available');
@@ -1625,6 +2333,29 @@ export class ResellerService {
       plan = await this.getPlan(input.planId);
       if (!plan.is_enabled) {
         throw new ResellerError('This plan is not available for ordering.', 409, 'plan_disabled');
+      }
+      if (!plan.provider_id) {
+        throw new ResellerError(
+          'This plan is no longer linked to an upstream provider. Re-sync the catalogue or pick another plan.',
+          409,
+          'plan_not_linked'
+        );
+      }
+      provider = await this.getProvider(Number(plan.provider_id));
+      if (!provider.is_enabled) {
+        throw new ResellerError(
+          `The provider behind this plan ("${provider.name}") is disabled.`,
+          409,
+          'provider_disabled'
+        );
+      }
+      // A storefront order may only use a provider whose storefront is open.
+      if (!input.placedBy && !provider.store_enabled) {
+        throw new ResellerError(
+          `"${provider.name}" is not selling to customers right now.`,
+          403,
+          'store_disabled'
+        );
       }
       if (plan.upstream_available === 0) {
         throw new ResellerError('This plan is currently out of stock upstream.', 409, 'not_available');
@@ -1658,10 +2389,15 @@ export class ResellerService {
       }
     }
 
+    if (!provider) provider = await this.resolveProvider(input.providerId);
+    client = await this.requireReady(provider.id);
+
     // --- Validate OS + naming ---------------------------------------------
     const osImage = await this.db.get<ResellerOsRow>(
-      `SELECT * FROM reseller_os_images WHERE upstream_os_id = ? AND is_enabled = 1 LIMIT 1`,
-      [String(input.os)]
+      `SELECT * FROM reseller_os_images
+       WHERE upstream_os_id = ? AND is_enabled = 1 AND (provider_id = ? OR provider_id IS NULL)
+       ORDER BY CASE WHEN provider_id = ? THEN 0 ELSE 1 END LIMIT 1`,
+      [String(input.os), provider.id, provider.id]
     );
     if (!osImage) {
       // Fall back to a live check so a freshly published image still works.
@@ -1743,6 +2479,8 @@ export class ResellerService {
         replayed: preview.replayed,
         errorCode: null,
         error: null,
+        providerId: provider?.id ?? null,
+        providerName: provider?.name ?? null,
         pricing,
         balancePreview: balance
           ? {
@@ -1769,17 +2507,18 @@ export class ResellerService {
 
     const inserted = await this.db.run(
       `INSERT INTO reseller_orders (
-         order_ref, user_id, plan_id, provider, server_name, hostname, os_id,
+         order_ref, user_id, plan_id, provider_id, provider, server_name, hostname, os_id,
          cores, memory_gb, disk_gb, ipv4_count, ipv6_count, cpu_family, duration_months,
          auto_renew, retail_cents, setup_cents, charged_cents, cost_cents, currency,
          payment_mode, status, idempotency_key, sandbox, placed_by, notes,
          created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,0,?,?,datetime('now'),datetime('now'))`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,0,?,?,datetime('now'),datetime('now'))`,
       [
         orderRef,
         input.userId,
         plan ? plan.id : null,
-        cfg.reseller_provider,
+        provider.id,
+        provider.provider,
         serverName,
         hostname,
         String(input.os),
@@ -1831,12 +2570,24 @@ export class ResellerService {
     orderId: number,
     options: { paymentMode?: string } = {}
   ): Promise<OrderOutcome> {
-    const client = await this.requireReady();
     const order = await this.db.get<Record<string, any>>(
       `SELECT * FROM reseller_orders WHERE id = ?`,
       [orderId]
     );
     if (!order) throw new ResellerError('Order not found.', 404, 'order_not_found');
+
+    // Each order is pinned to the provider it was placed with, so a queued
+    // retry always goes back to the same upstream API.
+    let client: ResellerApiClient;
+    try {
+      client = await this.requireReady(await this.providerIdForRow(order));
+    } catch (err) {
+      const e = toResellerError(err);
+      if (e.code === 'reseller_not_configured' || e.code === 'provider_not_found') {
+        await this.markOrderFailed(orderId, 'provider_not_configured', e.message);
+      }
+      throw e;
+    }
     if (order.status === 'provisioned') {
       return this.buildOutcome(order);
     }
@@ -1976,6 +2727,7 @@ export class ResellerService {
     const serverId = await this.upsertCloudServer({
       userId: order.user_id,
       orderId,
+      providerId: order.provider_id ?? null,
       provider: order.provider,
       productId,
       detail: result,
@@ -2114,6 +2866,7 @@ export class ResellerService {
   public async listOrders(options: {
     userId?: number;
     status?: string;
+    providerId?: number | null;
     limit?: number;
     offset?: number;
   } = {}): Promise<{ orders: Record<string, any>[]; total: number }> {
@@ -2127,6 +2880,10 @@ export class ResellerService {
       clauses.push('o.status = ?');
       params.push(options.status);
     }
+    if (options.providerId) {
+      clauses.push('o.provider_id = ?');
+      params.push(options.providerId);
+    }
     const where = `WHERE ${clauses.join(' AND ')}`;
     const limit = Math.max(1, Math.min(500, options.limit ?? 50));
     const offset = Math.max(0, options.offset ?? 0);
@@ -2136,10 +2893,12 @@ export class ResellerService {
       params
     );
     const orders = await this.db.all(
-      `SELECT o.*, u.username AS customer_username, p.display_name AS plan_name
+      `SELECT o.*, u.username AS customer_username, p.display_name AS plan_name,
+              rp.name AS provider_name
        FROM reseller_orders o
        LEFT JOIN users u ON u.id = o.user_id
        LEFT JOIN reseller_plans p ON p.id = o.plan_id
+       LEFT JOIN reseller_providers rp ON rp.id = o.provider_id
        ${where}
        ORDER BY o.id DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset]
@@ -2149,10 +2908,12 @@ export class ResellerService {
 
   public async getOrder(orderId: number): Promise<Record<string, any>> {
     const order = await this.db.get<Record<string, any>>(
-      `SELECT o.*, u.username AS customer_username, p.display_name AS plan_name
+      `SELECT o.*, u.username AS customer_username, p.display_name AS plan_name,
+              rp.name AS provider_name
        FROM reseller_orders o
        LEFT JOIN users u ON u.id = o.user_id
        LEFT JOIN reseller_plans p ON p.id = o.plan_id
+       LEFT JOIN reseller_providers rp ON rp.id = o.provider_id
        WHERE o.id = ?`,
       [orderId]
     );
@@ -2167,6 +2928,7 @@ export class ResellerService {
   private async upsertCloudServer(params: {
     userId: number;
     orderId: number | null;
+    providerId: number | null;
     provider: string;
     productId: string;
     detail: Partial<UpstreamKvmServerDetail>;
@@ -2180,8 +2942,10 @@ export class ResellerService {
   }): Promise<number> {
     const d = params.detail;
     const existing = await this.db.get<CloudServerRow>(
-      `SELECT * FROM cloud_servers WHERE provider_product_id = ? LIMIT 1`,
-      [params.productId]
+      params.providerId
+        ? `SELECT * FROM cloud_servers WHERE provider_product_id = ? AND provider_id = ? LIMIT 1`
+        : `SELECT * FROM cloud_servers WHERE provider_product_id = ? LIMIT 1`,
+      params.providerId ? [params.productId, params.providerId] : [params.productId]
     );
 
     const name = String(d.name || d.customName || params.order?.server_name || params.productId).slice(0, 120);
@@ -2233,16 +2997,17 @@ export class ResellerService {
 
     const inserted = await this.db.run(
       `INSERT INTO cloud_servers (
-         user_id, order_id, provider, provider_product_id, name, hostname, cpu_family, cpu_label,
+         user_id, order_id, provider_id, provider, provider_product_id, name, hostname, cpu_family, cpu_label,
          cores, memory_gb, disk_gb, connection_gbit, ipv4_count, ipv6_count, primary_ipv4,
          primary_ipv6, os_id, os_label, ssh_user, ssh_port, credentials_enc, upstream_state,
          power_status, retail_cents, renew_cents, cost_cents, currency, duration_months,
          auto_renew, billing_mode, expires_at, suspended, last_synced_at, upstream_created_at,
          created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,datetime('now'),datetime('now'))`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,datetime('now'),datetime('now'))`,
       [
         params.userId,
         params.orderId,
+        params.providerId,
         params.provider,
         params.productId,
         name,
@@ -2284,27 +3049,33 @@ export class ResellerService {
     includeShared?: boolean;
     state?: string;
     search?: string;
+    providerId?: number | null;
     limit?: number;
   } = {}): Promise<CloudServerRow[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (options.userId) {
-      clauses.push('user_id = ?');
+      clauses.push('c.user_id = ?');
       params.push(options.userId);
     }
     if (options.state) {
-      clauses.push('upstream_state = ?');
+      clauses.push('c.upstream_state = ?');
       params.push(options.state);
     }
+    if (options.providerId) {
+      clauses.push('c.provider_id = ?');
+      params.push(options.providerId);
+    }
     if (options.search) {
-      clauses.push('(name LIKE ? OR primary_ipv4 LIKE ? OR provider_product_id LIKE ?)');
+      clauses.push('(c.name LIKE ? OR c.primary_ipv4 LIKE ? OR c.provider_product_id LIKE ?)');
       const like = `%${options.search}%`;
       params.push(like, like, like);
     }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const limit = Math.max(1, Math.min(500, options.limit ?? 200));
     return this.db.all<CloudServerRow>(
-      `SELECT * FROM cloud_servers ${where} ORDER BY created_at DESC, id DESC LIMIT ?`,
+      `SELECT c.* FROM cloud_servers c ${where}
+       ORDER BY c.created_at DESC, c.id DESC LIMIT ?`,
       [...params, limit]
     );
   }
@@ -2361,6 +3132,7 @@ export class ResellerService {
     return {
       id: server.id,
       userId: server.user_id,
+      providerId: server.provider_id ?? null,
       provider: server.provider,
       upstreamProductId: server.provider_product_id,
       name: server.name,
@@ -2405,8 +3177,8 @@ export class ResellerService {
     serverId: number,
     options: { withStatus?: boolean } = {}
   ): Promise<{ server: CloudServerRow; status: UpstreamKvmStatus | null }> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError(
         'This server is not linked to an upstream product yet.',
@@ -2475,8 +3247,8 @@ export class ResellerService {
     action: 'start' | 'stop' | 'restart',
     actor?: { userId: number; role: string }
   ): Promise<CloudServerRow> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -2512,8 +3284,8 @@ export class ResellerService {
   }
 
   public async serverConsoleUrl(serverId: number): Promise<{ consoleUrl: string }> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -2527,8 +3299,8 @@ export class ResellerService {
   }
 
   public async serverStatus(serverId: number): Promise<UpstreamKvmStatus> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -2544,8 +3316,8 @@ export class ResellerService {
     serverId: number,
     period: 'hour' | 'day' | 'week' | 'month' | 'year' = 'hour'
   ): Promise<UpstreamKvmStatistics> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -2553,8 +3325,8 @@ export class ResellerService {
   }
 
   public async serverNetwork(serverId: number, rdns = false): Promise<UpstreamKvmNetwork> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -2562,8 +3334,8 @@ export class ResellerService {
   }
 
   public async serverFirewall(serverId: number): Promise<UpstreamFirewall> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -2575,8 +3347,8 @@ export class ResellerService {
     input: { os: string; password?: string; confirm: true },
     actor?: { userId: number; role: string }
   ): Promise<{ state: string; credentials: { username: string; password: string } | null }> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -2640,8 +3412,8 @@ export class ResellerService {
     password: string,
     actor?: { userId: number; role: string }
   ): Promise<{ username: string; password: string }> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -2677,8 +3449,8 @@ export class ResellerService {
     autoRenew: boolean,
     actor?: { userId: number; role: string }
   ): Promise<CloudServerRow> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -2702,8 +3474,8 @@ export class ResellerService {
     name: string,
     actor?: { userId: number; role: string }
   ): Promise<CloudServerRow> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     const clean = sanitizeProductName(name);
     if (!clean) throw new ResellerError('Please provide a valid server name.', 422, 'invalid_name');
     if (server.provider_product_id) {
@@ -2771,7 +3543,7 @@ export class ResellerService {
     let quote: UpstreamRenewQuote | null = null;
     if (server.provider_product_id) {
       try {
-        const client = await this.requireReady();
+        const client = await this.requireReady(await this.providerIdForRow(server));
         quote = await client.getRenewal(server.provider_product_id);
       } catch {
         quote = null;
@@ -2801,8 +3573,8 @@ export class ResellerService {
     walletBalanceCents: number;
     newExpiresAt: string | null;
   }> {
-    const client = await this.requireReady();
     const server = await this.getCloudServer(serverId);
+    const client = await this.requireReady(await this.providerIdForRow(server));
     if (!server.provider_product_id) {
       throw new ResellerError('This server is still being provisioned.', 409, 'not_provisioned');
     }
@@ -2921,13 +3693,24 @@ export class ResellerService {
     this.syncTimer = null;
   }
 
+  /** Re-syncs every provider that is enabled, configured and selling. */
   private async syncCatalogueIfEnabled(): Promise<void> {
     if (this.syncRunning) return;
-    const ready = await this.isReady();
-    if (!ready.ready) return;
+    const providers = await this.listProviders({ enabledOnly: true }).catch(() => []);
+    if (!providers.length) return;
     this.syncRunning = true;
     try {
-      await this.syncCatalogue();
+      for (const provider of providers) {
+        if (!this.resolveProviderApiKey(provider)) continue;
+        try {
+          await this.syncCatalogue({ providerId: provider.id });
+        } catch (err) {
+          console.warn(
+            `[Reseller] catalogue sync failed for "${provider.name}":`,
+            (err as Error).message
+          );
+        }
+      }
     } finally {
       this.syncRunning = false;
     }
@@ -2950,8 +3733,11 @@ export class ResellerService {
     if (this.pollRunning) {
       return { ordersRetried: 0, ordersProvisioned: 0, serversUpdated: 0, becameActive: 0, errors: [] };
     }
-    const ready = await this.isReady();
-    if (!ready.ready) {
+    // Any ready provider is enough to run one pass: each order/server below
+    // is reconciled against the provider it actually belongs to.
+    const readyProviders = (await this.listProviders({ enabledOnly: true }).catch(() => []))
+      .filter((p) => !!this.resolveProviderApiKey(p));
+    if (!readyProviders.length) {
       return { ordersRetried: 0, ordersProvisioned: 0, serversUpdated: 0, becameActive: 0, errors: [] };
     }
 
@@ -2999,9 +3785,21 @@ export class ResellerService {
          ORDER BY last_synced_at ASC LIMIT 15`
       );
 
-      const client = await this.getClient();
+      const clientFor = async (server: CloudServerRow): Promise<ResellerApiClient | null> => {
+        try {
+          return await this.getClient(await this.providerIdForRow(server));
+        } catch {
+          return null;
+        }
+      };
+
       for (const server of [...building, ...staleActive]) {
         if (!server.provider_product_id) continue;
+        const client = await clientFor(server);
+        if (!client) {
+          errors.push(`server#${server.id}: no usable upstream provider configured`);
+          continue;
+        }
         try {
           const detail = await client.getKvm(server.provider_product_id);
           let status: UpstreamKvmStatus | null = null;
@@ -3042,8 +3840,10 @@ export class ResellerService {
         }
       }
 
-      // 4) Low upstream balance warning ------------------------------------
-      await this.checkUpstreamBalanceAlert(client).catch(() => undefined);
+      // 4) Low upstream balance warning (one alert per provider) ------------
+      for (const provider of readyProviders) {
+        await this.checkUpstreamBalanceAlert(provider).catch(() => undefined);
+      }
     } finally {
       this.pollRunning = false;
     }
@@ -3079,18 +3879,25 @@ export class ResellerService {
     });
   }
 
-  private lastBalanceAlertAt = 0;
+  /** Last low-balance notification, keyed by provider id. */
+  private readonly lastBalanceAlertAt = new Map<number, number>();
 
-  private async checkUpstreamBalanceAlert(client: ResellerApiClient): Promise<void> {
+  private async checkUpstreamBalanceAlert(provider: ResellerProviderRow): Promise<void> {
     const cfg = await this.getSettings();
-    // At most one alert per hour.
-    if (Date.now() - this.lastBalanceAlertAt < 60 * 60 * 1000) return;
+    // At most one alert per provider per hour.
+    const last = this.lastBalanceAlertAt.get(provider.id) || 0;
+    if (Date.now() - last < 60 * 60 * 1000) return;
     try {
+      const client = await this.getClient(provider.id);
       const balance = await client.getBalance();
       const cents = moneyToCents(balance.amount);
-      await this.setSetting('reseller_upstream_balance_cents', String(cents));
+      await this.db.run(`UPDATE reseller_providers SET last_balance_cents = ? WHERE id = ?`, [
+        cents,
+        provider.id,
+      ]);
+      if (provider.is_default) await this.setSetting('reseller_upstream_balance_cents', String(cents));
       if (cents < cfg.reseller_low_balance_alert_cents) {
-        this.lastBalanceAlertAt = Date.now();
+        this.lastBalanceAlertAt.set(provider.id, Date.now());
         const admins = await this.db.all<{ id: number }>(
           `SELECT id FROM users WHERE role = 'admin' AND is_active = 1`
         );
@@ -3098,9 +3905,9 @@ export class ResellerService {
           await this.notify(
             admin.id,
             'error',
-            'Upstream reseller balance is low',
-            `Only ${centsToMoney(cents)} ${balance.currency || 'EUR'} left at the provider. New orders will fail with insufficient_balance once it is exhausted.`,
-            { balanceCents: cents }
+            `Upstream balance is low — ${provider.name}`,
+            `Only ${centsToMoney(cents)} ${balance.currency || 'EUR'} left at ${provider.name}. New orders from this provider will fail with insufficient_balance once it is exhausted.`,
+            { balanceCents: cents, providerId: provider.id }
           );
         }
       }
@@ -3158,11 +3965,15 @@ export class ResellerService {
       ]).catch(() => null) ?? null;
     }
     if (!server && productId) {
+      // Product ids are only unique per provider, so scope the lookup when
+      // the order knows which upstream it came from.
       server =
         (await this.db
           .get<CloudServerRow>(
-            `SELECT * FROM cloud_servers WHERE provider_product_id = ? ORDER BY id DESC LIMIT 1`,
-            [productId]
+            order.provider_id
+              ? `SELECT * FROM cloud_servers WHERE provider_product_id = ? AND provider_id = ? ORDER BY id DESC LIMIT 1`
+              : `SELECT * FROM cloud_servers WHERE provider_product_id = ? ORDER BY id DESC LIMIT 1`,
+            order.provider_id ? [productId, order.provider_id] : [productId]
           )
           .catch(() => undefined)) || null;
     }
@@ -3176,9 +3987,19 @@ export class ResellerService {
           ? await this.getWalletBalance(order.user_id).catch(() => 0)
           : 0;
 
+    const providerRow = order.provider_id
+      ? await this.db
+          .get<{ id: number; name: string }>(`SELECT id, name FROM reseller_providers WHERE id = ?`, [
+            order.provider_id,
+          ])
+          .catch(() => null)
+      : null;
+
     return {
       orderId: num(order.id),
       orderRef: String(order.order_ref || ''),
+      providerId: providerRow?.id ?? (order.provider_id ? num(order.provider_id) : null),
+      providerName: providerRow?.name ?? null,
       status: String(order.status || 'pending'),
       sandbox: !!order.sandbox,
       retailCents: num(order.retail_cents),
@@ -3324,6 +4145,8 @@ function toStorePlan(plan: ResellerPlanRow): StorePlan {
     upstreamPlanId: plan.upstream_plan_id,
     upstreamConfig,
     discountPercent: plan.upstream_discount_percent,
+    providerId: plan.provider_id ?? null,
+    providerName: null,
   };
 }
 
