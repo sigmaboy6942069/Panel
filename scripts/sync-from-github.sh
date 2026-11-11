@@ -23,8 +23,48 @@ BRANCH="${1:-main}"
 DRY_RUN=0
 [[ "${2:-}" == "--dry-run" ]] && DRY_RUN=1
 
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$APP_DIR"
+# ---------------------------------------------------------------------------
+# Locate the panel install.
+#
+# This script must work no matter where it was copied to: scripts/, the repo
+# root, /root, or run via a symlink. So instead of assuming it sits one level
+# below the install (which broke when copied to the repo root — it walked up to
+# /opt and reported "Not a git checkout"), use git itself to find the worktree
+# containing this file, then fall back to the current directory.
+# ---------------------------------------------------------------------------
+resolve_install_dir() {
+  local self="${BASH_SOURCE[0]}"
+  # Follow symlinks so `ln -s .../sync-from-github.sh /usr/local/bin/sync` works.
+  while [[ -L "$self" ]]; do
+    local target
+    target="$(readlink "$self")"
+    [[ "$target" != /* ]] && target="$(dirname "$self")/$target"
+    self="$target"
+  done
+  local script_dir
+  script_dir="$(cd "$(dirname "$self")" && pwd)"
+
+  # 1) The script's own directory may itself be inside a git worktree.
+  if git -C "$script_dir" rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$script_dir" rev-parse --show-toplevel
+    return 0
+  fi
+  # 2) Its parent may be (the scripts/ layout).
+  if git -C "$script_dir/.." rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$script_dir/.." rev-parse --show-toplevel
+    return 0
+  fi
+  # 3) Current directory.
+  if git -C "$PWD" rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$PWD" rev-parse --show-toplevel
+    return 0
+  fi
+  # 4) Last resort: the parent of the script's directory (legacy behaviour).
+  (cd "$script_dir/.." 2>/dev/null && pwd)
+}
+
+APP_DIR="$(resolve_install_dir)"
+cd "$APP_DIR" || { echo "[FAIL] Cannot enter $APP_DIR"; exit 1; }
 
 # Paths that hold live state. Never checkout, clean, or overwrite these.
 PROTECTED=(data .env .tgvpanel-secret .hkvm-secret node_modules)
@@ -34,7 +74,31 @@ ok()   { printf "\033[1;32m[ OK ]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[WARN]\033[0m %s\n" "$*"; }
 die()  { printf "\033[1;31m[FAIL]\033[0m %s\n" "$*"; exit 1; }
 
-[[ -d .git ]] || die "Not a git checkout: $APP_DIR"
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo
+  echo "This does not look like a TGVPANEL git checkout."
+  echo
+  echo "  Script location : ${BASH_SOURCE[0]}"
+  echo "  Resolved to     : $APP_DIR"
+  echo "  Current dir     : $PWD"
+  echo
+  echo "Run it from inside your panel install, e.g.:"
+  echo "    cd /opt/tgvpanel && sudo ./sync.sh main"
+  echo
+  echo "Or pass the install path explicitly:"
+  echo "    sudo TGVPANEL_DIR=/opt/tgvpanel ./sync.sh main"
+  echo
+  die "No git repository found."
+fi
+
+# Allow an explicit override when detection cannot know (e.g. run from /root).
+if [[ -n "${TGVPANEL_DIR:-}" ]]; then
+  if ! git -C "$TGVPANEL_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+    die "TGVPANEL_DIR=$TGVPANEL_DIR is not a git checkout."
+  fi
+  APP_DIR="$(git -C "$TGVPANEL_DIR" rev-parse --show-toplevel)"
+  cd "$APP_DIR"
+fi
 
 if [[ -z "$(git status --porcelain --untracked-files=no -- "${PROTECTED[@]}" 2>/dev/null | grep -v '^??' || true)" ]]; then
   : # protected paths are clean
