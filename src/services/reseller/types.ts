@@ -461,8 +461,37 @@ export type ResellerOrderStatus =
 
 export type ResellerPaymentMode = 'wallet' | 'free' | 'manual';
 
+/**
+ * A configured upstream reseller account. Panels may have several: each row
+ * owns its own API key, base URL, catalogue, orders and servers.
+ */
+export interface ResellerProviderRow {
+  id: number;
+  slug: string;
+  name: string;
+  provider: string;
+  base_url: string;
+  api_key_enc: string | null;
+  api_key_hint: string | null;
+  is_default: number;
+  is_enabled: number;
+  store_enabled: number;
+  markup_percent: number | null;
+  request_timeout_ms: number;
+  last_sync_at: string | null;
+  last_probe_at: string | null;
+  last_balance_cents: number | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  sort_order: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ResellerPlanRow {
   id: number;
+  provider_id: number | null;
   provider: string;
   upstream_plan_id: string | null;
   kind: 'package' | 'config';
@@ -501,6 +530,7 @@ export interface ResellerPlanRow {
 
 export interface ResellerOsRow {
   id: number;
+  provider_id: number | null;
   provider: string;
   upstream_os_id: string;
   display_name: string;
@@ -517,6 +547,7 @@ export interface CloudServerRow {
   id: number;
   user_id: number;
   order_id: number | null;
+  provider_id: number | null;
   provider: string;
   provider_product_id: string | null;
   name: string;

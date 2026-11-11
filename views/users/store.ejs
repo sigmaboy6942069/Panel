@@ -204,7 +204,12 @@
           <div class="cpu-group">
             <div class="cpu-group-head">
               <h2><%= group.label %></h2>
-              <span><%= group.plans.length %> plan<%= group.plans.length === 1 ? '' : 's' %> · Düsseldorf, DE</span>
+              <span><%= group.plans.length %> plan<%= group.plans.length === 1 ? '' : 's' %><%
+                var groupProviders = [];
+                group.plans.forEach(function (p) {
+                  if (p.providerName && groupProviders.indexOf(p.providerName) === -1) groupProviders.push(p.providerName);
+                });
+              %><%= groupProviders.length ? ' · ' + groupProviders.join(', ') : ' · Düsseldorf, DE' %></span>
             </div>
             <div class="plan-grid">
               <% group.plans.forEach(function(plan) { %>
@@ -214,6 +219,9 @@
                   <div>
                     <div class="plan-cpu"><%= plan.cpuLabel %></div>
                     <h3 class="plan-name"><%= plan.displayName %></h3>
+                    <% if (plan.providerName) { %>
+                      <div style="font-size:11px;color:var(--text-muted)">provided by <%= plan.providerName %></div>
+                    <% } %>
                   </div>
 
                   <div class="plan-specs">

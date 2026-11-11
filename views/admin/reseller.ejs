@@ -123,9 +123,10 @@
           <div class="alert alert-error">Could not load reseller status.</div>
         <% } else if (!status.configured) { %>
           <div class="alert alert-warn">
-            <strong>No upstream API key configured.</strong>
-            Add your reseller API key on the <button class="btn btn-sm" onclick="showTab('provider')" style="margin:0 4px">Provider</button> tab.
-            Nothing is sold until a key is set and the integration is enabled.
+            <strong>No upstream API key configured for this provider.</strong>
+            Add a key on the <button class="btn btn-sm" onclick="showTab('provider')" style="margin:0 4px">Provider settings</button> tab,
+            or connect another upstream account on the <button class="btn btn-sm" onclick="showTab('providers')" style="margin:0 4px">Providers</button> tab.
+            Nothing is sold until a key is set and the provider is enabled.
           </div>
         <% } else if (!status.enabled) { %>
           <div class="alert alert-info">The integration is configured but <strong>disabled</strong>. Enable it on the Provider tab to start selling.</div>
@@ -145,7 +146,8 @@
       <div class="rs-stats" id="statStrip"></div>
 
       <div class="tabs">
-        <button class="tab active" data-tab="provider" onclick="showTab('provider')">Provider</button>
+        <button class="tab active" data-tab="providers" onclick="showTab('providers')">Providers <span id="providersBadge"></span></button>
+        <button class="tab" data-tab="provider" onclick="showTab('provider')">Provider settings</button>
         <button class="tab" data-tab="catalogue" onclick="showTab('catalogue')">Catalogue &amp; pricing</button>
         <button class="tab" data-tab="orders" onclick="showTab('orders')">Orders</button>
         <button class="tab" data-tab="fleet" onclick="showTab('fleet')">Fleet</button>
@@ -153,18 +155,109 @@
         <button class="tab" data-tab="logs" onclick="showTab('logs')">Upstream API log</button>
       </div>
 
+      <!-- ============================ PROVIDERS ============================ -->
+      <div class="pane active" id="pane-providers">
+        <div class="card">
+          <h3>
+            Upstream reseller APIs
+            <span class="note">
+              Each provider is an independent upstream account with its own API key, base URL and
+              catalogue. Customers see one merged storefront; every order is fulfilled and billed
+              against the provider that owns the plan.
+            </span>
+          </h3>
+          <div style="display:flex;gap:8px;margin-bottom:13px;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-primary" onclick="openProviderForm()">+ Add provider</button>
+            <button class="btn" onclick="probeAllProviders()">Probe all</button>
+            <button class="btn" onclick="syncAllProviders()">Sync all catalogues</button>
+            <span style="flex:1"></span>
+            <span class="note" style="font-size:11px;color:var(--text-muted)">
+              Panel-wide switch:
+              <label class="switch" style="vertical-align:middle;margin-left:6px">
+                <input type="checkbox" id="cfgEnabledTop" onchange="saveGlobalEnabled(this.checked)">
+                <span class="slider"></span>
+              </label>
+            </span>
+          </div>
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th>Provider</th><th>Key</th><th>Selling</th><th>Plans</th><th>Servers</th>
+                  <th>Balance</th><th>Last sync</th><th>Health</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="providerRows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>How multi-provider reselling behaves</h3>
+          <div class="two-col" style="font-size:13px;color:var(--text-secondary);line-height:1.6">
+            <div>
+              <strong style="color:var(--text-primary)">Catalogue</strong>
+              <p style="margin:4px 0 0">
+                <em>Sync catalogue</em> pulls plans and OS images per provider. Plans are stored with
+                the provider that offered them, so identical plan names or upstream ids from two
+                providers never collide. New plans always start disabled.
+              </p>
+            </div>
+            <div>
+              <strong style="color:var(--text-primary)">Ordering</strong>
+              <p style="margin:4px 0 0">
+                A package plan orders from its own provider. Custom configurations use the provider
+                selected in the configurator. Idempotency keys, retries and the reconciliation loop
+                are all provider-scoped.
+              </p>
+            </div>
+            <div>
+              <strong style="color:var(--text-primary)">Servers</strong>
+              <p style="margin:4px 0 0">
+                Every server remembers its provider, so power, console, reinstall, renewal and
+                background refreshes always call the correct upstream API — even after a provider is
+                renamed or its key rotated.
+              </p>
+            </div>
+            <div>
+              <strong style="color:var(--text-primary)">Removing</strong>
+              <p style="margin:4px 0 0">
+                A provider can only be removed once it has no provisioned servers and no open orders,
+                so customers never lose access to a running VPS.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ============================ PROVIDER ============================ -->
-      <div class="pane active" id="pane-provider">
+      <div class="pane" id="pane-provider">
+        <div class="card" style="padding:13px 17px">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px">
+            <strong style="color:var(--text-primary)">Editing provider:</strong>
+            <select id="editProviderSelect" onchange="selectProvider(Number(this.value))"
+              style="padding:8px 11px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,.03);color:var(--text-primary);font-size:13px;min-width:240px">
+            </select>
+            <span id="editProviderMeta" class="note" style="font-size:11px;color:var(--text-muted)"></span>
+            <span style="flex:1"></span>
+            <button class="btn btn-sm" onclick="openProviderForm()">+ Add provider</button>
+          </div>
+        </div>
         <div class="two-col">
           <div class="card">
             <h3>Upstream connection <span class="note" id="connNote"></span></h3>
             <div class="f-grid">
               <div class="f full">
+                <label for="cfgProviderName">Provider name</label>
+                <input id="cfgProviderName" type="text" maxlength="80" placeholder="e.g. Bukkit-Hosting EU">
+                <div class="hint">Shown to staff only — customers just see the plans.</div>
+              </div>
+              <div class="f full">
                 <label for="cfgApiKey">Reseller API key</label>
                 <input id="cfgApiKey" type="password" autocomplete="off" placeholder="<%= status && status.keyHint ? 'stored: ' + status.keyHint : 'your API key' %>">
                 <div class="hint">
                   Stored AES-256-GCM encrypted in the panel vault — never in plaintext, never sent to the browser again.
-                  Leave empty to keep the current key. You can also set <code>RESELLER_API_KEY</code> in <code>.env</code>.
+                  Leave empty to keep the current key. For the default provider you can also set <code>RESELLER_API_KEY</code> in <code>.env</code>.
                 </div>
               </div>
               <div class="f full">
@@ -177,9 +270,24 @@
                 <input id="cfgTimeout" type="number" min="2000" max="120000" step="500">
               </div>
               <div class="f">
+                <label for="cfgProviderMarkup">Markup override (%) <span style="text-transform:none;font-weight:500">(blank = default)</span></label>
+                <input id="cfgProviderMarkup" type="number" min="-90" max="1000" step="1">
+                <div class="hint">Used for this provider's catalogue and quotes instead of the panel default.</div>
+              </div>
+              <div class="f">
+                <label>Provider enabled</label>
+                <label class="switch"><input type="checkbox" id="cfgProviderEnabled"><span class="slider"></span></label>
+                <div class="hint">Master switch for this provider only.</div>
+              </div>
+              <div class="f">
+                <label>Storefront open (this provider)</label>
+                <label class="switch"><input type="checkbox" id="cfgProviderStore"><span class="slider"></span></label>
+                <div class="hint">Lets customers buy this provider's plans from /store.</div>
+              </div>
+              <div class="f">
                 <label for="cfgLowBalance">Low-balance alert (EUR)</label>
                 <input id="cfgLowBalance" type="number" min="0" step="1">
-                <div class="hint">Admins get a notification below this upstream balance.</div>
+                <div class="hint">Admins get a notification below this upstream balance, per provider.</div>
               </div>
               <div class="f">
                 <label for="cfgPoll">Reconciliation interval (s)</label>
@@ -189,6 +297,10 @@
               <div class="f">
                 <label for="cfgSync">Catalogue sync interval (s)</label>
                 <input id="cfgSync" type="number" min="300" max="86400">
+              </div>
+              <div class="f full">
+                <label for="cfgProviderNotes">Internal notes <span style="text-transform:none;font-weight:500">(optional)</span></label>
+                <input id="cfgProviderNotes" type="text" maxlength="500" placeholder="Contract, account manager, region…">
               </div>
             </div>
             <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
@@ -203,14 +315,14 @@
               <h3>Selling</h3>
               <div class="f-grid">
                 <div class="f">
-                  <label>Integration enabled</label>
+                  <label>Integration enabled (all providers)</label>
                   <label class="switch"><input type="checkbox" id="cfgEnabled"><span class="slider"></span></label>
-                  <div class="hint">Master switch for all upstream calls.</div>
+                  <div class="hint">Panel-wide master switch for every upstream call.</div>
                 </div>
                 <div class="f">
-                  <label>Storefront open</label>
+                  <label>Storefront open (all providers)</label>
                   <label class="switch"><input type="checkbox" id="cfgStore"><span class="slider"></span></label>
-                  <div class="hint">Lets customers order from /store themselves.</div>
+                  <div class="hint">Panel-wide switch; each provider also has its own storefront toggle.</div>
                 </div>
                 <div class="f">
                   <label>Auto-renew by default</label>
@@ -256,6 +368,10 @@
           <div style="display:flex;gap:8px;margin-bottom:13px;flex-wrap:wrap">
             <button class="btn btn-primary" onclick="syncCatalogue()">Sync from provider</button>
             <button class="btn" onclick="openConfigPlan()">+ Custom configuration plan</button>
+            <select id="planProviderFilter" onchange="renderPlans()"
+              style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,.03);color:var(--text-primary);font-size:12px">
+              <option value="">All providers</option>
+            </select>
             <span style="flex:1"></span>
             <input id="planFilter" class="cell" style="max-width:220px;padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,.03);color:var(--text-primary);font-size:12px" placeholder="Filter by name or CPU…" oninput="renderPlans()">
           </div>
@@ -263,7 +379,7 @@
             <table class="grid">
               <thead>
                 <tr>
-                  <th>On</th><th>Plan</th><th>CPU</th><th>vCPU</th><th>RAM</th><th>Disk</th>
+                  <th>On</th><th>Plan</th><th>Provider</th><th>CPU</th><th>vCPU</th><th>RAM</th><th>Disk</th>
                   <th>Net</th><th>IPs</th><th>Cost</th><th>Retail</th><th>Renew</th><th>Setup</th>
                   <th>Margin</th><th>Vis</th><th>Stock</th><th></th>
                 </tr>
@@ -309,7 +425,7 @@
           <div class="table-wrap">
             <table class="grid">
               <thead>
-                <tr><th>Ref</th><th>Customer</th><th>Server</th><th>Plan</th><th>Status</th><th>Charged</th><th>Cost</th><th>Upstream</th><th>Created</th><th></th></tr>
+                <tr><th>Ref</th><th>Customer</th><th>Provider</th><th>Server</th><th>Plan</th><th>Status</th><th>Charged</th><th>Cost</th><th>Upstream</th><th>Created</th><th></th></tr>
               </thead>
               <tbody id="orderRows"></tbody>
             </table>
@@ -328,7 +444,7 @@
           <div class="table-wrap">
             <table class="grid">
               <thead>
-                <tr><th>Server</th><th>Owner</th><th>Spec</th><th>IP</th><th>State</th><th>Retail</th><th>Cost</th><th>Margin</th><th>Expires</th><th></th></tr>
+                <tr><th>Server</th><th>Owner</th><th>Provider</th><th>Spec</th><th>IP</th><th>State</th><th>Retail</th><th>Cost</th><th>Margin</th><th>Expires</th><th></th></tr>
               </thead>
               <tbody id="serverRows"></tbody>
             </table>
@@ -371,6 +487,68 @@
   </div>
 </div>
 
+<!-- ======================= add / edit provider ======================= -->
+<div class="overlay" id="providerOverlay">
+  <div class="overlay-card">
+    <h3 id="provTitle">Add upstream provider</h3>
+    <p>
+      A provider is one upstream reseller API account. Add as many as you resell from — each keeps its
+      own API key, base URL, catalogue and orders.
+    </p>
+    <div id="provError"></div>
+    <div class="f-grid">
+      <div class="f full">
+        <label for="provName">Display name</label>
+        <input id="provName" type="text" maxlength="80" placeholder="Bukkit-Hosting EU">
+        <div class="hint">Staff-facing label, e.g. the region or account owner.</div>
+      </div>
+      <div class="f full">
+        <label for="provBaseUrl">API base URL</label>
+        <input id="provBaseUrl" type="text" placeholder="https://bukkit-hosting.eu/api/v2">
+        <div class="hint">Provider API v2 root, without a trailing slash.</div>
+      </div>
+      <div class="f full">
+        <label for="provApiKey">API key <span style="text-transform:none;font-weight:500">(encrypted at rest)</span></label>
+        <input id="provApiKey" type="password" autocomplete="off" placeholder="Paste the reseller API key">
+      </div>
+      <div class="f">
+        <label for="provProvider">Adapter / provider type</label>
+        <input id="provProvider" type="text" value="bukkit-hosting" maxlength="60">
+        <div class="hint">Identifies the API dialect. Keep the default unless the upstream differs.</div>
+      </div>
+      <div class="f">
+        <label for="provMarkup">Markup override (%) <span style="text-transform:none;font-weight:500">(blank = default)</span></label>
+        <input id="provMarkup" type="number" min="-90" max="1000" step="1">
+      </div>
+      <div class="f">
+        <label for="provTimeout">Request timeout (ms)</label>
+        <input id="provTimeout" type="number" min="2000" max="120000" step="500" value="20000">
+      </div>
+      <div class="f">
+        <label>Enabled</label>
+        <label class="switch"><input type="checkbox" id="provEnabled" checked><span class="slider"></span></label>
+      </div>
+      <div class="f">
+        <label>Storefront open</label>
+        <label class="switch"><input type="checkbox" id="provStore" checked><span class="slider"></span></label>
+      </div>
+      <div class="f">
+        <label>Make default</label>
+        <label class="switch"><input type="checkbox" id="provDefault"><span class="slider"></span></label>
+        <div class="hint">Used when a plan or request does not name a provider.</div>
+      </div>
+      <div class="f full">
+        <label for="provNotes">Internal notes <span style="text-transform:none;font-weight:500">(optional)</span></label>
+        <input id="provNotes" type="text" maxlength="500">
+      </div>
+    </div>
+    <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:14px">
+      <button class="btn" onclick="closeProviderForm()">Cancel</button>
+      <button class="btn btn-primary" id="provSubmit" onclick="submitProvider()">Add provider</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= custom configuration plan ======================= -->
 <div class="overlay" id="cfgPlanOverlay">
   <div class="overlay-card">
@@ -378,6 +556,11 @@
     <p>Builds a sellable plan from the provider configurator. Pricing is quoted live at your configured markup.</p>
     <div id="cfgPlanLimits" class="alert alert-info" style="display:none"></div>
     <div class="f-grid">
+      <div class="f">
+        <label for="cpProvider">Upstream provider</label>
+        <select id="cpProvider" onchange="loadConfigurator()"></select>
+        <div class="hint">Plan is created and fulfilled against this provider.</div>
+      </div>
       <div class="f">
         <label for="cpCpu">CPU family</label>
         <select id="cpCpu" onchange="loadConfigurator()"><option value="">Loading…</option></select>
@@ -413,6 +596,11 @@
       <div class="f full">
         <label for="aoPlan">Plan</label>
         <select id="aoPlan" onchange="aoPrice()"></select>
+      </div>
+      <div class="f full">
+        <label for="aoProvider">Provider <span style="text-transform:none;font-weight:500">(for custom configurations)</span></label>
+        <select id="aoProvider"></select>
+        <div class="hint">Package plans always use the provider that owns them.</div>
       </div>
       <div class="f full">
         <label for="aoOs">Operating system</label>
@@ -483,8 +671,21 @@ const USERS = <%- JSON.stringify(users) %>;
 const WALLETS = <%- JSON.stringify(wallets) %>;
 const SERVERS = <%- JSON.stringify(servers) %>;
 const ORDERS = <%- JSON.stringify(orders) %>;
+let PROVIDERS = <%- JSON.stringify(providers || []) %>;
 let STATUS = <%- JSON.stringify(status) %>;
 let walletUserId = null;
+/** Provider currently being edited on the "Provider settings" tab. */
+let editingProviderId = (STATUS && STATUS.providerId) || (PROVIDERS[0] && PROVIDERS[0].id) || null;
+/** null = adding, otherwise the id being edited in the provider overlay. */
+let providerFormId = null;
+
+function providerById(id) {
+  return PROVIDERS.find(function (p) { return p.id === id; }) || null;
+}
+function providerName(id) {
+  const p = providerById(id);
+  return p ? p.name : (id ? '#' + id : '—');
+}
 
 function money(cents) {
   if (cents === null || cents === undefined || isNaN(cents)) return '—';
@@ -520,6 +721,7 @@ async function api(url, options) {
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
   document.querySelectorAll('.pane').forEach(function (p) { p.classList.toggle('active', p.id === 'pane-' + name); });
+  if (name === 'providers') loadProviders();
   if (name === 'orders') loadOrders();
   if (name === 'fleet') loadServers();
   if (name === 'wallets') renderWallets();
@@ -531,12 +733,13 @@ function showTab(name) {
 function renderStats() {
   if (!STATUS) { document.getElementById('statStrip').innerHTML = ''; return; }
   const u = STATUS.upstream, f = STATUS.fleet, o = STATUS.orders, c = STATUS.catalogue;
+  const t = STATUS.totals || {};
   const cards = [
-    { label: 'Upstream balance', value: u.balanceCents === null ? '—' : money(u.balanceCents), sub: u.reachable ? 'connected · ' + esc(u.account && u.account.username ? u.account.username : '') : (u.errorCode || 'not probed'), accent: u.reachable ? '#10B981' : '#EF4444' },
-    { label: 'Reseller tier', value: u.resellerTier || (u.reseller ? 'yes' : '—'), sub: u.account ? 'role ' + esc(u.account.role) : '', accent: '#8B5CF6' },
+    { label: 'Upstream balance', value: u.balanceCents === null ? '—' : money(u.balanceCents), sub: (STATUS.providerName ? esc(STATUS.providerName) + ' · ' : '') + (u.reachable ? 'connected · ' + esc(u.account && u.account.username ? u.account.username : '') : (u.errorCode || 'not probed')), accent: u.reachable ? '#10B981' : '#EF4444' },
+    { label: 'Providers', value: (t.enabled || 0) + ' / ' + (t.providers || 0), sub: (t.configured || 0) + ' with an API key', accent: '#8B5CF6' },
     { label: 'Monthly revenue', value: money(f.monthlyRetailCents), sub: 'cost ' + money(f.monthlyCostCents), accent: '#6366F1' },
-    { label: 'Monthly margin', value: money(f.monthlyMarginCents), sub: f.serversTotal + ' servers (' + f.active + ' active)', accent: '#22D3EE' },
-    { label: 'Published plans', value: c.plansEnabled + ' / ' + c.plansTotal, sub: c.osImages + ' OS images · synced ' + (c.lastSyncAt ? esc(c.lastSyncAt) : 'never'), accent: '#F59E0B' },
+    { label: 'Monthly margin', value: money(t.monthlyMarginCents || f.monthlyMarginCents), sub: (t.serversTotal || f.serversTotal) + ' servers across all providers', accent: '#22D3EE' },
+    { label: 'Published plans', value: (t.plansEnabled || c.plansEnabled) + ' / ' + c.plansTotal, sub: c.osImages + ' OS images · synced ' + (c.lastSyncAt ? esc(c.lastSyncAt) : 'never'), accent: '#F59E0B' },
     { label: 'Order queue', value: o.pending + o.provisioning, sub: o.provisioned + ' provisioned · ' + o.failed + ' failed', accent: o.failed ? '#EF4444' : '#10B981' },
     { label: 'Customer credit', value: money(STATUS.wallet.totalBalanceCents), sub: STATUS.wallet.customersWithCredit + ' customers with credit', accent: '#10B981' },
     { label: 'Expiring ≤ 7 days', value: f.expiringSoon, sub: f.installing + ' building · ' + f.suspended + ' suspended', accent: f.expiringSoon ? '#F59E0B' : '#6B7280' },
@@ -553,9 +756,9 @@ function renderStats() {
 function renderConfig() {
   if (!STATUS) return;
   document.getElementById('cfgEnabled').checked = !!STATUS.enabled;
+  document.getElementById('cfgEnabledTop').checked = !!STATUS.enabled;
   document.getElementById('cfgStore').checked = !!STATUS.storeEnabled;
   api('/api/v1/reseller/admin/config').then(function (cfg) {
-    document.getElementById('cfgTimeout').value = cfg.requestTimeoutMs;
     document.getElementById('cfgLowBalance').value = (cfg.lowBalanceAlertCents / 100).toFixed(2);
     document.getElementById('cfgPoll').value = cfg.pollIntervalSec;
     document.getElementById('cfgSync').value = cfg.syncIntervalSec;
@@ -563,8 +766,33 @@ function renderConfig() {
     document.getElementById('cfgTos').value = cfg.tosText || '';
     document.getElementById('cfgAutoRenew').checked = !!cfg.autoRenewDefault;
     document.getElementById('cfgConfigurator').checked = !!cfg.allowConfigurator;
-    if (cfg.baseUrl) document.getElementById('cfgBaseUrl').value = cfg.baseUrl;
   }).catch(function (e) { toast(e.message, 'error'); });
+
+  // Per-provider connection fields
+  const sel = document.getElementById('editProviderSelect');
+  if (sel) {
+    sel.innerHTML = PROVIDERS.length
+      ? PROVIDERS.map(function (p) {
+          return '<option value="' + p.id + '"' + (p.id === editingProviderId ? ' selected' : '') + '>' +
+            esc(p.name) + (p.isDefault ? ' · default' : '') + (p.keyConfigured ? '' : ' · no key') + '</option>';
+        }).join('')
+      : '<option value="">No providers yet</option>';
+  }
+  const current = providerById(editingProviderId);
+  if (current) {
+    document.getElementById('cfgProviderName').value = current.name;
+    document.getElementById('cfgBaseUrl').value = current.baseUrl || '';
+    document.getElementById('cfgTimeout').value = current.requestTimeoutMs;
+    document.getElementById('cfgProviderMarkup').value = current.markupPercent === null || current.markupPercent === undefined ? '' : current.markupPercent;
+    document.getElementById('cfgProviderEnabled').checked = !!current.enabled;
+    document.getElementById('cfgProviderStore').checked = !!current.storeEnabled;
+    document.getElementById('cfgProviderNotes').value = current.notes || '';
+    document.getElementById('cfgApiKey').placeholder = current.keyHint ? 'stored: ' + current.keyHint : 'paste this provider\'s API key';
+    document.getElementById('editProviderMeta').textContent =
+      (current.isDefault ? 'default provider · ' : '') +
+      (current.keyConfigured ? 'key ' + (current.keyHint || 'configured') : 'no API key stored') +
+      (current.storeEnabled ? ' · storefront open' : ' · storefront closed');
+  }
 
   const u = STATUS.upstream;
   document.getElementById('connNote').textContent = u.checkedAt ? 'last probe ' + u.checkedAt + ' UTC' : '';
@@ -593,33 +821,55 @@ function renderConfig() {
 
 async function loadStatus(probe) {
   try {
-    STATUS = await api('/api/v1/reseller/admin/status' + (probe === false ? '?probe=0' : ''));
+    const qs = [];
+    if (probe === false) qs.push('probe=0');
+    if (editingProviderId) qs.push('providerId=' + encodeURIComponent(editingProviderId));
+    STATUS = await api('/api/v1/reseller/admin/status' + (qs.length ? '?' + qs.join('&') : ''));
     renderStats();
     renderConfig();
+    if (Array.isArray(STATUS.providers)) {
+      PROVIDERS = STATUS.providers;
+      renderProviders();
+    }
     if (probe === true) toast(STATUS.upstream.reachable ? 'Provider reachable' : 'Provider not reachable', STATUS.upstream.reachable ? 'success' : 'error');
   } catch (e) { toast(e.message, 'error'); }
 }
 
 async function saveConfig() {
+  // Panel-wide settings live on `settings`; connection details are per provider.
   const payload = {
     enabled: document.getElementById('cfgEnabled').checked,
     storeEnabled: document.getElementById('cfgStore').checked,
     autoRenewDefault: document.getElementById('cfgAutoRenew').checked,
     allowConfigurator: document.getElementById('cfgConfigurator').checked,
     defaultMarkupPercent: Number(document.getElementById('cfgMarkup').value),
-    requestTimeoutMs: Number(document.getElementById('cfgTimeout').value),
     lowBalanceAlertCents: Math.round(Number(document.getElementById('cfgLowBalance').value || 0) * 100),
     pollIntervalSec: Number(document.getElementById('cfgPoll').value),
     syncIntervalSec: Number(document.getElementById('cfgSync').value),
-    baseUrl: document.getElementById('cfgBaseUrl').value.trim(),
     tosText: document.getElementById('cfgTos').value,
   };
   const key = document.getElementById('cfgApiKey').value.trim();
-  if (key) payload.apiKey = key;
+
   try {
+    if (editingProviderId) {
+      const provPayload = {
+        name: document.getElementById('cfgProviderName').value.trim(),
+        baseUrl: document.getElementById('cfgBaseUrl').value.trim(),
+        requestTimeoutMs: Number(document.getElementById('cfgTimeout').value),
+        markupPercent: document.getElementById('cfgProviderMarkup').value === ''
+          ? null
+          : Number(document.getElementById('cfgProviderMarkup').value),
+        enabled: document.getElementById('cfgProviderEnabled').checked,
+        storeEnabled: document.getElementById('cfgProviderStore').checked,
+        notes: document.getElementById('cfgProviderNotes').value.trim(),
+      };
+      if (key) provPayload.apiKey = key;
+      await api('/api/v1/reseller/admin/providers/' + editingProviderId, { method: 'PUT', body: provPayload });
+    }
     await api('/api/v1/reseller/admin/config', { method: 'PUT', body: payload });
     document.getElementById('cfgApiKey').value = '';
     toast('Configuration saved', 'success');
+    await loadProviders();
     loadStatus(true);
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -627,7 +877,10 @@ async function saveConfig() {
 async function testConnection() {
   try {
     toast('Contacting provider…');
-    const r = await api('/api/v1/reseller/admin/test-connection', { method: 'POST' });
+    const url = editingProviderId
+      ? '/api/v1/reseller/admin/providers/' + editingProviderId + '/test-connection'
+      : '/api/v1/reseller/admin/test-connection';
+    const r = await api(url, { method: 'POST' });
     if (r.ok) {
       toast('Connected as ' + (r.account ? r.account.username : 'unknown') + ' · balance ' + money(r.balanceCents), 'success');
     } else {
@@ -638,21 +891,192 @@ async function testConnection() {
 }
 
 async function clearKey() {
-  if (!confirm('Remove the stored upstream API key? The integration stops working until a new key is set.')) return;
+  if (!editingProviderId) { toast('No provider selected', 'error'); return; }
+  if (!confirm('Remove the stored API key for "' + providerName(editingProviderId) + '"? That provider stops working until a new key is set.')) return;
   try {
-    await api('/api/v1/reseller/admin/config', { method: 'PUT', body: { apiKey: '' } });
+    await api('/api/v1/reseller/admin/providers/' + editingProviderId, { method: 'PUT', body: { apiKey: '' } });
     toast('API key removed', 'success');
+    await loadProviders();
     loadStatus(false);
   } catch (e) { toast(e.message, 'error'); }
 }
 
-async function syncCatalogue() {
+// ------------------------------- providers --------------------------------
+
+async function loadProviders() {
   try {
-    toast('Syncing catalogue from the provider…');
-    const r = await api('/api/v1/reseller/admin/sync', { method: 'POST' });
-    toast('Synced ' + r.plansUpserted + ' plans (' + r.plansNew + ' new) and ' + r.osUpserted + ' OS images', 'success');
-    if (r.plansNew) toast(r.plansNew + ' new plan(s) were added DISABLED — enable them in the catalogue tab.', 'info');
+    const r = await api('/api/v1/reseller/admin/providers');
+    PROVIDERS = r.providers || [];
+    renderProviders();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function renderProviders() {
+  const body = document.getElementById('providerRows');
+  if (!body) return;
+  const badge = document.getElementById('providersBadge');
+  if (badge) badge.textContent = PROVIDERS.length ? '(' + PROVIDERS.length + ')' : '';
+  if (!PROVIDERS.length) {
+    body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:22px">' +
+      'No providers configured yet — click <strong>Add provider</strong> to connect your first upstream reseller API.</td></tr>';
+    return;
+  }
+  body.innerHTML = PROVIDERS.map(function (p) {
+    const health = !p.keyConfigured
+      ? '<span class="pill warn">no key</span>'
+      : (p.lastError
+          ? '<span class="pill err" title="' + esc(p.lastError) + '">error</span>'
+          : (p.lastProbeAt ? '<span class="pill ok">reachable</span>' : '<span class="pill info">not probed</span>'));
+    const balance = p.lastBalanceCents === null || p.lastBalanceCents === undefined
+      ? '—'
+      : '<span style="color:' + (p.lowBalanceAlert ? '#F59E0B' : '#10B981') + ';font-weight:700">' + money(p.lastBalanceCents) + '</span>';
+    const actions = [
+      '<button class="btn btn-sm" onclick="probeProvider(' + p.id + ')">probe</button>',
+      '<button class="btn btn-sm" onclick="syncProvider(' + p.id + ')">sync</button>',
+      '<button class="btn btn-sm" onclick="editProvider(' + p.id + ')">edit</button>',
+      p.isDefault ? '<span class="pill info">default</span>' : '<button class="btn btn-sm" onclick="makeDefaultProvider(' + p.id + ')">default</button>',
+      '<button class="btn btn-sm btn-danger" onclick="deleteProvider(' + p.id + ')">remove</button>',
+    ].join(' ');
+    return '<tr>' +
+      '<td><strong>' + esc(p.name) + '</strong>' +
+        '<div style="font-size:10px;color:var(--text-muted)">' + esc(p.slug) + ' · ' + esc(p.baseUrl) +
+        (p.notes ? ' · ' + esc(p.notes) : '') + '</div></td>' +
+      '<td class="mono" style="font-size:11px">' + (p.keyConfigured ? esc(p.keyHint || 'configured') : '<span style="color:#F59E0B">not set</span>') + '</td>' +
+      '<td>' + (p.enabled
+        ? '<span class="pill ok">enabled</span>'
+        : '<span class="pill off">disabled</span>') +
+        '<div style="font-size:10px;margin-top:2px">' + (p.storeEnabled ? 'storefront open' : 'storefront closed') + '</div></td>' +
+      '<td>' + p.plansEnabled + ' / ' + p.plansTotal + '<div style="font-size:10px;color:var(--text-muted)">' + p.osImages + ' OS</div></td>' +
+      '<td>' + p.serversTotal + '<div style="font-size:10px;color:var(--text-muted)">' + p.serversActive + ' active · ' + p.ordersPending + ' queued</div></td>' +
+      '<td class="mono">' + balance + '</td>' +
+      '<td style="font-size:11px">' + (p.lastSyncAt ? esc(String(p.lastSyncAt).slice(0, 16)) : 'never') + '</td>' +
+      '<td>' + health + '</td>' +
+      '<td style="white-space:nowrap">' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function selectProvider(id) {
+  editingProviderId = id;
+  renderConfig();
+  loadStatus(true);
+}
+
+function editProvider(id) {
+  editingProviderId = id;
+  showTab('provider');
+  renderConfig();
+}
+
+function openProviderForm() {
+  providerFormId = null;
+  document.getElementById('provTitle').textContent = 'Add upstream provider';
+  document.getElementById('provSubmit').textContent = 'Add provider';
+  document.getElementById('provError').innerHTML = '';
+  document.getElementById('provName').value = '';
+  document.getElementById('provBaseUrl').value = 'https://bukkit-hosting.eu/api/v2';
+  document.getElementById('provApiKey').value = '';
+  document.getElementById('provProvider').value = 'bukkit-hosting';
+  document.getElementById('provMarkup').value = '';
+  document.getElementById('provTimeout').value = 20000;
+  document.getElementById('provEnabled').checked = true;
+  document.getElementById('provStore').checked = true;
+  document.getElementById('provDefault').checked = PROVIDERS.length === 0;
+  document.getElementById('provNotes').value = '';
+  document.getElementById('providerOverlay').classList.add('open');
+}
+
+function closeProviderForm() {
+  document.getElementById('providerOverlay').classList.remove('open');
+}
+
+async function submitProvider() {
+  const btn = document.getElementById('provSubmit');
+  const errBox = document.getElementById('provError');
+  errBox.innerHTML = '';
+  const payload = {
+    name: document.getElementById('provName').value.trim(),
+    baseUrl: document.getElementById('provBaseUrl').value.trim(),
+    apiKey: document.getElementById('provApiKey').value.trim() || undefined,
+    provider: document.getElementById('provProvider').value.trim() || undefined,
+    markupPercent: document.getElementById('provMarkup').value === ''
+      ? null
+      : Number(document.getElementById('provMarkup').value),
+    requestTimeoutMs: Number(document.getElementById('provTimeout').value),
+    enabled: document.getElementById('provEnabled').checked,
+    storeEnabled: document.getElementById('provStore').checked,
+    makeDefault: document.getElementById('provDefault').checked,
+    notes: document.getElementById('provNotes').value.trim() || null,
+  };
+  if (!payload.name) { errBox.innerHTML = '<div class="alert alert-error">A display name is required.</div>'; return; }
+  if (!payload.baseUrl) { errBox.innerHTML = '<div class="alert alert-error">An API base URL is required.</div>'; return; }
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    await api('/api/v1/reseller/admin/providers', { method: 'POST', body: payload });
+    closeProviderForm();
+    toast('Provider added', 'success');
+    await loadProviders();
+    editingProviderId = PROVIDERS.length ? PROVIDERS[PROVIDERS.length - 1].id : editingProviderId;
+    loadStatus(false);
+  } catch (e) {
+    errBox.innerHTML = '<div class="alert alert-error">' + esc(e.message) + '</div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Add provider';
+  }
+}
+
+async function probeAllProviders() {
+  try {
+    toast('Probing every provider…');
+    const r = await api('/api/v1/reseller/admin/providers?probe=1');
+    PROVIDERS = r.providers || [];
+    renderProviders();
+    const broken = PROVIDERS.filter(function (p) { return p.keyConfigured && p.lastError; });
+    toast(broken.length ? broken.length + ' provider(s) unreachable' : 'All providers reachable', broken.length ? 'error' : 'success');
+    loadStatus(false);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function syncAllProviders() {
+  try {
+    toast('Syncing all provider catalogues…');
+    const r = await api('/api/v1/reseller/admin/providers/sync', { method: 'POST' });
+    const total = (r.results || []).reduce(function (a, x) { return a + (x.plansUpserted || 0); }, 0);
+    toast('Synced ' + (r.results || []).length + ' provider(s), ' + total + ' plans total', r.ok ? 'success' : 'error');
+    if (r.errors && r.errors.length) toast(r.errors.length + ' provider(s) failed — see the Providers tab', 'error');
     await loadPlans();
+    await loadProviders();
+    loadStatus(false);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function saveGlobalEnabled(enabled) {
+  try {
+    await api('/api/v1/reseller/admin/config', { method: 'PUT', body: { enabled: enabled } });
+    toast(enabled ? 'Reselling enabled for all providers' : 'Reselling disabled', 'success');
+    document.getElementById('cfgEnabled').checked = enabled;
+    loadStatus(false);
+  } catch (e) {
+    toast(e.message, 'error');
+    document.getElementById('cfgEnabledTop').checked = !enabled;
+  }
+}
+async function syncCatalogue(providerId) {
+  // No provider given = sync the one being edited, or every provider.
+  const target = providerId || editingProviderId;
+  try {
+    toast('Syncing catalogue from ' + (target ? providerName(target) : 'every provider') + '…');
+    const r = await api('/api/v1/reseller/admin/providers/sync' + (target ? '?providerId=' + target : ''), { method: 'POST' });
+    const ok = (r.results || []).reduce(function (a, x) { return a + (x.plansUpserted || 0); }, 0);
+    const fresh = (r.results || []).reduce(function (a, x) { return a + (x.plansNew || 0); }, 0);
+    const osCount = (r.results || []).reduce(function (a, x) { return a + (x.osUpserted || 0); }, 0);
+    toast('Synced ' + ok + ' plans (' + fresh + ' new) and ' + osCount + ' OS images across ' + (r.results || []).length + ' provider(s)', 'success');
+    if (fresh) toast(fresh + ' new plan(s) were added DISABLED — enable them in the catalogue tab.', 'info');
+    if (r.errors && r.errors.length) toast(r.errors.length + ' provider(s) failed — see the Providers tab', 'error');
+    await loadPlans();
+    await loadProviders();
     loadStatus(false);
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -681,15 +1105,36 @@ async function loadPlans() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+function planProviderName(id) {
+  if (!id) return '<span style="color:var(--text-muted)">legacy</span>';
+  const p = providerById(id);
+  return p
+    ? '<span class="pill info" title="' + esc(p.baseUrl) + '">' + esc(p.name) + '</span>'
+    : '<span class="pill warn">#' + esc(id) + '</span>';
+}
+
+function renderPlanProviderFilter() {
+  const sel = document.getElementById('planProviderFilter');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All providers</option>' + PROVIDERS.map(function (p) {
+    return '<option value="' + p.id + '">' + esc(p.name) + '</option>';
+  }).join('');
+  sel.value = current;
+}
+
 function renderPlans() {
+  renderPlanProviderFilter();
   const q = (document.getElementById('planFilter').value || '').toLowerCase();
+  const providerFilter = document.getElementById('planProviderFilter').value;
   const rows = PLANS.filter(function (p) {
+    if (providerFilter && String(p.provider_id || '') !== providerFilter) return false;
     if (!q) return true;
-    return (p.display_name + ' ' + (p.cpu_family || '') + ' ' + (p.cpu_label || '')).toLowerCase().includes(q);
+    return (p.display_name + ' ' + (p.cpu_family || '') + ' ' + (p.cpu_label || '') + ' ' + providerName(p.provider_id)).toLowerCase().includes(q);
   });
   const body = document.getElementById('planRows');
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="16" style="text-align:center;color:var(--text-muted);padding:22px">No plans yet — sync the catalogue from the provider.</td></tr>';
+    body.innerHTML = '<tr><td colspan="17" style="text-align:center;color:var(--text-muted);padding:22px">No plans yet — sync the catalogue from the provider.</td></tr>';
     return;
   }
   body.innerHTML = rows.map(function (p) {
@@ -698,6 +1143,7 @@ function renderPlans() {
     return '<tr data-id="' + p.id + '">' +
       '<td><label class="switch"><input type="checkbox" ' + (p.is_enabled ? 'checked' : '') + ' onchange="togglePlan(' + p.id + ', \'is_enabled\', this.checked)"><span class="slider"></span></label></td>' +
       '<td><strong>' + esc(p.display_name) + '</strong><div style="font-size:10px;color:var(--text-muted)">' + esc(p.kind) + (p.slug ? ' · ' + esc(p.slug) : '') + '</div></td>' +
+      '<td>' + planProviderName(p.provider_id) + '</td>' +
       '<td><span class="pill info">' + esc((p.cpu_label || p.cpu_family || '—')) + '</span></td>' +
       '<td>' + p.cores + '</td><td>' + p.memory_gb + ' GB</td><td>' + p.disk_gb + ' GB</td>' +
       '<td>' + p.connection_gbit + ' Gb</td><td>' + p.ipv4_count + '/' + p.ipv6_count + '</td>' +
@@ -774,8 +1220,9 @@ function renderOs() {
 async function openConfigPlan() {
   document.getElementById('cfgPlanOverlay').classList.add('open');
   document.getElementById('cpQuote').innerHTML = 'Loading configurator…';
+  fillProviderSelect('cpProvider', editingProviderId);
   try {
-    const r = await api('/api/v1/reseller/admin/configurator');
+    const r = await api('/api/v1/reseller/admin/configurator?providerId=' + encodeURIComponent(document.getElementById('cpProvider').value));
     const list = r.configurator || [];
     const sel = document.getElementById('cpCpu');
     sel.innerHTML = list.length
@@ -825,6 +1272,7 @@ async function doPriceConfig() {
   const markup = document.getElementById('cpMarkup').value;
   try {
     const q = await api('/api/v1/reseller/admin/configurator/price?' + new URLSearchParams({
+      providerId: document.getElementById('cpProvider').value,
       cpu: cpu,
       cores: document.getElementById('cpCores').value,
       memory: document.getElementById('cpMemory').value,
@@ -844,6 +1292,7 @@ async function doPriceConfig() {
 
 async function createConfigPlan() {
   const payload = {
+    providerId: Number(document.getElementById('cpProvider').value) || null,
     cpu: document.getElementById('cpCpu').value,
     cores: Number(document.getElementById('cpCores').value),
     memory: Number(document.getElementById('cpMemory').value),
@@ -880,7 +1329,7 @@ async function loadOrders() {
 function renderOrders() {
   const body = document.getElementById('orderRows');
   if (!ORDERS.length) {
-    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:22px">No orders yet.</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:22px">No orders yet.</td></tr>';
     return;
   }
   body.innerHTML = ORDERS.map(function (o) {
@@ -888,6 +1337,7 @@ function renderOrders() {
     return '<tr>' +
       '<td class="mono">' + esc(o.order_ref) + '</td>' +
       '<td>' + esc(o.customer_username || ('#' + o.user_id)) + '</td>' +
+      '<td>' + (o.provider_name ? '<span class="pill info">' + esc(o.provider_name) + '</span>' : planProviderName(o.provider_id)) + '</td>' +
       '<td><strong>' + esc(o.server_name || '—') + '</strong><div style="font-size:10px;color:var(--text-muted)">' + esc(o.os_id || '') + '</div></td>' +
       '<td>' + esc(o.plan_name || (o.cpu_family ? o.cpu_family + ' ' + o.cores + 'c/' + o.memory_gb + 'G/' + o.disk_gb + 'G' : '—')) + '</td>' +
       '<td><span class="pill ' + esc(o.status) + '">' + esc(o.status) + '</span>' +
@@ -943,7 +1393,20 @@ function aoPrice() {
   box.textContent = opt && opt.dataset.cents ? 'This will charge ' + money(opt.dataset.cents) + ' according to the billing mode selected.' : '';
 }
 
+function fillProviderSelect(id, selectedId) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const enabled = PROVIDERS.filter(function (p) { return p.enabled; });
+  sel.innerHTML = enabled.length
+    ? enabled.map(function (p) {
+        return '<option value="' + p.id + '"' + (p.id === selectedId ? ' selected' : '') + '>' +
+          esc(p.name) + (p.keyConfigured ? '' : ' · no API key') + (p.isDefault ? ' · default' : '') + '</option>';
+      }).join('')
+    : '<option value="">No enabled providers</option>';
+}
+
 function openAdminOrder() {
+  fillProviderSelect('aoProvider', editingProviderId);
   const u = document.getElementById('aoUser');
   u.innerHTML = USERS.map(function (x) {
     return '<option value="' + x.id + '">' + esc(x.username) + (x.email ? ' (' + esc(x.email) + ')' : '') + ' · ' + esc(x.role) + '</option>';
@@ -970,6 +1433,7 @@ async function submitAdminOrder() {
       body: {
         userId: Number(document.getElementById('aoUser').value),
         planId: Number(planId),
+        providerId: Number(document.getElementById('aoProvider').value) || null,
         os: document.getElementById('aoOs').value,
         name: document.getElementById('aoName').value.trim() || null,
         hostname: document.getElementById('aoHostname').value.trim() || null,
@@ -1013,13 +1477,16 @@ function renderServers() {
   };
   const rows = SERVERS.filter(function (s) {
     if (!q) return true;
-    return (s.name + ' ' + (s.primaryIpv4 || '') + ' ' + (s.upstreamProductId || '') + ' ' + ownerName(s.userId)).toLowerCase().includes(q);
+    return (s.name + ' ' + (s.primaryIpv4 || '') + ' ' + (s.upstreamProductId || '') + ' ' + ownerName(s.userId) + ' ' + providerName(s.providerId)).toLowerCase().includes(q);
   });
   const body = document.getElementById('serverRows');
   const marginTotal = SERVERS.reduce(function (a, s) { return a + ((s.retailCents || 0) - (s.costCents || 0)); }, 0);
-  document.getElementById('fleetNote').textContent = SERVERS.length + ' servers · monthly margin ' + money(marginTotal);
+  const providerCount = {};
+  SERVERS.forEach(function (s) { if (s.providerId) providerCount[s.providerId] = (providerCount[s.providerId] || 0) + 1; });
+  document.getElementById('fleetNote').textContent = SERVERS.length + ' servers across ' +
+    Object.keys(providerCount).length + ' provider(s) · monthly margin ' + money(marginTotal);
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:22px">No servers provisioned yet.</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:22px">No servers provisioned yet.</td></tr>';
     return;
   }
   body.innerHTML = rows.map(function (s) {
@@ -1029,6 +1496,7 @@ function renderServers() {
     return '<tr>' +
       '<td><strong>' + esc(s.name) + '</strong><div style="font-size:10px;color:var(--text-muted)">' + esc(s.cpuLabel || s.cpuFamily || '') + ' · ' + esc(s.osLabel || '') + '</div></td>' +
       '<td>' + esc(ownerName(s.userId)) + '</td>' +
+      '<td>' + planProviderName(s.providerId) + '</td>' +
       '<td>' + s.cores + ' vCPU / ' + s.memoryGb + ' GB / ' + s.diskGb + ' GB</td>' +
       '<td class="mono">' + esc(s.primaryIpv4 || '—') + (s.primaryIpv6 ? '<div style="font-size:10px">' + esc(s.primaryIpv6) + '</div>' : '') + '</td>' +
       '<td><span class="pill ' + stCls + '">' + esc(stLabel) + '</span></td>' +
@@ -1169,12 +1637,14 @@ async function loadLogs() {
 // --------------------------------- init ------------------------------------
 
 renderStats();
+renderProviders();
 renderConfig();
 renderPlans();
 renderOs();
 renderOrders();
 renderServers();
 renderWallets();
+loadProviders();
 loadStatus(true);
 setInterval(function () { loadStatus(false); }, 60000);
 </script>

@@ -15,19 +15,20 @@ clear, retryable error instead of crashing.
 ## Table of Contents
 
 1. [How It Works](#1-how-it-works)
-2. [What Gets Installed (migration v12)](#2-what-gets-installed-migration-v12)
-3. [Quick Start — Add Your API Key](#3-quick-start--add-your-api-key)
-4. [Environment Variables](#4-environment-variables)
-5. [Selling Model & Money Handling](#5-selling-model--money-handling)
-6. [The Order Pipeline (idempotency & crash-safety)](#6-the-order-pipeline-idempotency--crash-safety)
-7. [Customer Experience](#7-customer-experience)
-8. [Admin Console](#8-admin-console)
-9. [REST API Reference](#9-rest-api-reference)
-10. [Upstream Error Codes & How They Map](#10-upstream-error-codes--how-they-map)
-11. [Background Jobs](#11-background-jobs)
-12. [Security Notes](#12-security-notes)
-13. [Testing Without a Live Key](#13-testing-without-a-live-key)
-14. [Troubleshooting](#14-troubleshooting)
+2. [What Gets Installed (migrations v12 & v13)](#2-what-gets-installed-migrations-v12--v13)
+3. [Multiple Upstream Providers](#3-multiple-upstream-providers)
+4. [Quick Start — Add Your API Key](#4-quick-start--add-your-api-key)
+5. [Environment Variables](#5-environment-variables)
+6. [Selling Model & Money Handling](#6-selling-model--money-handling)
+7. [The Order Pipeline (idempotency & crash-safety)](#7-the-order-pipeline-idempotency--crash-safety)
+8. [Customer Experience](#8-customer-experience)
+9. [Admin Console](#9-admin-console)
+10. [REST API Reference](#10-rest-api-reference)
+11. [Upstream Error Codes & How They Map](#11-upstream-error-codes--how-they-map)
+12. [Background Jobs](#12-background-jobs)
+13. [Security Notes](#13-security-notes)
+14. [Testing Without a Live Key](#14-testing-without-a-live-key)
+15. [Troubleshooting](#15-troubleshooting)
 
 ---
 
@@ -68,7 +69,7 @@ so they live in their own tables, endpoints and pages.
 
 ---
 
-## 2. What Gets Installed (migration v12)
+## 2. What Gets Installed (migrations v12 & v13)
 
 Migration `v012_reseller_upstream_provisioning` runs automatically on the next
 panel start (a pre-migration backup is taken first, as with every migration). It
@@ -83,13 +84,18 @@ creates six tables and seeds 18 `reseller_*` settings:
 | `reseller_wallet_ledger` | Append-only customer credit ledger (grants, orders, renewals, refunds). Balance = `SUM(delta_cents)`. |
 | `reseller_api_logs` | Raw upstream traffic for support/debugging, credential-redacted and trimmed to 2000 rows. |
 
-Key settings (all editable in the admin console):
+> **Changed in v13:** connection details (base URL, API key, timeout, markup)
+> moved out of `settings` and into the `reseller_providers` table so you can run
+> several upstream accounts at once. See
+> [§3 Multiple Upstream Providers](#3-multiple-upstream-providers). The legacy
+> `reseller_api_base_url` / `reseller_api_key_enc` rows are still read **once**
+> to seed the first provider, then left untouched as a fallback.
+
+Panel-wide settings (all editable in the admin console):
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `reseller_enabled` | `0` | Master switch. Nothing upstream happens until this is `1`. |
-| `reseller_api_base_url` | `https://bukkit-hosting.eu/api/v2` | Provider API v2 root. |
-| `reseller_api_key_enc` | *(empty)* | AES-256-GCM encrypted API key (set via UI or `.env`). |
 | `reseller_store_enabled` | `1` | Lets customers self-order from `/store`. |
 | `reseller_default_markup_percent` | `20` | Markup applied to newly synced plans. |
 | `reseller_auto_renew_default` | `1` | Pre-ticks auto-renewal at checkout. |
@@ -100,7 +106,128 @@ Key settings (all editable in the admin console):
 
 ---
 
-## 3. Quick Start — Add Your API Key
+## 3. Multiple Upstream Providers
+
+You are not tied to one reseller account. Each **provider** is an independent
+upstream: its own API key, base URL, catalogue, order queue, server fleet and
+log. Keep the panel on one account, or sell from several at once.
+
+### 3.1 The provider model
+
+A row in `reseller_providers` holds one upstream account:
+
+| Column | Meaning |
+| --- | --- |
+| `slug` | Stable machine name (`bukkit-eu`, `provider-2`…). Auto-derived from the name and de-duplicated. |
+| `name` | Human label shown in the console and on the storefront. |
+| `provider` | Adapter family. Only `bukkit-hosting` (API v2) ships today; more can be added in `src/services/reseller/`. |
+| `base_url` | API v2 root, normalised without a trailing slash. |
+| `api_key_enc` | AES-256-GCM ciphertext. **Never** returned by any endpoint — only `api_key_hint` (e.g. `ab12…wxyz`) and `keyConfigured`. |
+| `is_default` | Exactly one row is the default. Used as the fallback for anything that does not name a provider. |
+| `is_enabled` | Master switch for that provider. A disabled provider is never called. |
+| `store_enabled` | Whether its plans appear on `/store`. |
+| `markup_percent` | Per-provider override; falls back to `reseller_default_markup_percent`. |
+| `request_timeout_ms` | Per-provider HTTP timeout. |
+| `last_sync_at`, `last_probe_at`, `last_balance_cents`, `last_error` | Last-known health, updated by probes and background jobs. |
+
+Ownership is a `provider_id` column on `reseller_plans`, `reseller_os_images`,
+`reseller_orders`, `cloud_servers` and `reseller_api_logs`.
+
+### 3.2 How requests pick a provider
+
+```
+customer order ──▶ plan.provider_id ──▶ that provider's client
+admin action   ──▶ ?providerId= or the form's provider select
+background job ──▶ iterates every enabled provider
+```
+
+* **Placing an order** always uses the provider that owns the plan. A plan with
+  no provider (left over from a deleted provider) is refused with
+  `plan_not_linked` rather than silently routed elsewhere.
+* **Catalogue, orders, fleet, logs** accept `?providerId=`; without it you see
+  the default provider's view, with an "All providers" option in the UI.
+* **Reconciliation and catalogue sync** run per provider and one failure does
+  not stop the others.
+* **Storefront** merges every provider with `is_enabled = 1 AND store_enabled = 1`
+  and labels each plan with its provider. Slugs for non-default providers are
+  prefixed (`bukkit-eu-epyc-4`) so two upstreams can never collide.
+
+Operating systems are unique **per provider**, not globally — two providers may
+both offer `ubuntu-24.04`, and each keeps its own enable/order flags.
+
+### 3.3 Adding a provider in the console
+
+`/admin/reseller` → **Providers** tab → **Add provider**. Required: a display
+name and an API base URL. Optional: provider family, API key, markup, timeout,
+notes, and the enabled/storefront/default switches.
+
+Then:
+
+1. **probe** — calls `GET /account` upstream and stores balance + last error.
+2. **sync** — imports that provider's plans and OS images into your catalogue.
+3. **edit** — change any field; saving with an empty key field keeps the
+   existing key. Use **Remove key** to clear it (that provider then reports
+   `missing_api_key` and is skipped until a key is set again).
+4. **default** — promotes it to the fallback provider.
+5. **remove** — deletes it, but only when it has **no servers and no
+   open orders**. Its catalogue is retired first (plans disabled and hidden),
+   so nothing lingering can be sold.
+
+You can also **probe all** and **sync all** from the tab header.
+
+### 3.4 Deleting a provider safely
+
+Removal is guarded on purpose:
+
+* Servers or open (`pending` / `provisioning`) orders referencing it → `409
+  provider_in_use`, with counts in the message.
+* Otherwise the provider's OS images are deleted and its plans are disabled +
+  hidden. The plans row survives so historical orders and margins still join to
+  a product; new orders cannot use it.
+* If you delete the default, the lowest-id remaining provider is promoted
+  automatically.
+
+### 3.5 Migrating an existing single-provider install
+
+Nothing to do — migration `v013_reseller_multi_provider`:
+
+1. creates `reseller_providers` and adds `provider_id` to the five tables;
+2. seeds **one** provider from your existing `reseller_api_base_url` /
+   `reseller_api_key_enc` / `reseller_provider` settings (falling back to
+   `RESELLER_API_KEY` / `RESELLER_API_BASE_URL` env if those are unset),
+   marking it default;
+3. backfills every existing plan, OS image, order, server and log row to it;
+4. scopes OS-image uniqueness to `(provider_id, upstream_os_id)` via
+   `idx_reseller_os_provider_os`. Builds that declared the old pair as an
+   *inline* `UNIQUE(provider, upstream_os_id)` are detected and the table is
+   rebuilt, because SQLite backs inline constraints with an implicit auto-index
+   that `DROP INDEX` cannot remove.
+
+Your storefront, catalogue and servers keep working with no re-keying. After
+that you can add a second provider; the first is untouched.
+
+### 3.6 Handy SQL (read-only checks)
+
+```sql
+-- what is configured, and is each one healthy?
+SELECT id, slug, name, base_url, is_default, is_enabled, store_enabled,
+       last_balance_cents, last_error
+FROM reseller_providers ORDER BY is_default DESC, id;
+
+-- catalogue spread per provider
+SELECT rp.name, COUNT(p.id) AS plans, SUM(p.is_enabled) AS enabled
+FROM reseller_plans p LEFT JOIN reseller_providers rp ON rp.id = p.provider_id
+GROUP BY p.provider_id;
+
+-- any row that lost its provider? (should be empty)
+SELECT 'plans' AS t, COUNT(*) FROM reseller_plans WHERE provider_id IS NULL
+UNION ALL SELECT 'servers', COUNT(*) FROM cloud_servers WHERE provider_id IS NULL
+UNION ALL SELECT 'orders',  COUNT(*) FROM reseller_orders WHERE provider_id IS NULL;
+```
+
+---
+
+## 4. Quick Start — Add Your API Key
 
 You can add the key at any time — the panel runs fine without it.
 
@@ -127,7 +254,7 @@ variable.
 
 ---
 
-## 4. Environment Variables
+## 5. Environment Variables
 
 All optional; the admin console values win where both exist.
 
@@ -149,7 +276,7 @@ the reseller poller.
 
 ---
 
-## 5. Selling Model & Money Handling
+## 6. Selling Model & Money Handling
 
 * **All money is integer cents (EUR).** Upstream string amounts like `"12.50"`
   are parsed to `1250`; nothing floats.
@@ -175,7 +302,7 @@ Order billing modes (admin-placed orders):
 
 ---
 
-## 6. The Order Pipeline (idempotency & crash-safety)
+## 7. The Order Pipeline (idempotency & crash-safety)
 
 Placing an order is the one operation that spends real money, so it is built to
 be safe under retries, restarts and network loss:
@@ -210,7 +337,7 @@ anything** and without needing TOS acceptance. The storefront uses it for the
 
 ---
 
-## 7. Customer Experience
+## 8. Customer Experience
 
 | Page | Route | What the customer does |
 | --- | --- | --- |
@@ -228,33 +355,40 @@ models show through): **AMD EPYC 7543, AMD Ryzen 9 5900X / 5950X / 9900X /
 
 ---
 
-## 8. Admin Console
+## 9. Admin Console
 
-`/admin/reseller` (roles: `admin`, `subadmin`, `operator`; the key-mutation
-endpoint is `admin`-only) has six tabs:
+`/admin/reseller` (roles: `admin`, `subadmin`, `operator`; deleting a provider
+is `admin`-only) has seven tabs:
 
-* **Provider** — API key, base URL, timeout, low-balance alert, poll/sync
-  intervals; selling switches (enabled, storefront, auto-renew default,
-  configurator, default markup, checkout terms); live upstream account card
-  (balance, reseller tier, rate limits) after a probe.
-* **Catalogue & pricing** — every plan with inline retail/renewal/setup editing,
-  enable/visible toggles, stock state, margin, an "Apply markup" quick action,
-  and a **custom configuration plan** builder (quotes the provider configurator
-  live at your markup). OS image table below.
-* **Orders** — the queue with filters, per-order failure reason, **retry**
-  (re-drives with the same idempotency key) and **cancel**, plus
-  **Order for a customer** (choose billing mode).
-* **Fleet** — every provisioned server, owner, spec, IP, state, retail vs cost
-  vs margin, expiry, and suspend/unsuspend/renew actions.
+* **Providers** — every upstream account with key hint, enabled/storefront
+  state, plan/OS/server counts, balance and last error. Per row: **probe**,
+  **sync**, **edit**, **default**, **remove**; plus **probe all** / **sync all**
+  and **Add provider**. This is where you run several reseller APIs at once —
+  see [§3](#3-multiple-upstream-providers).
+* **Settings** — panel-wide selling switches (enabled, storefront, auto-renew
+  default, configurator, default markup, low-balance alert, poll/sync
+  intervals, checkout terms) and the **connection pane for the selected
+  provider**: name, base URL, API key, timeout, markup, notes.
+* **Catalogue & pricing** — every plan with a **provider column + filter**,
+  inline retail/renewal/setup editing, enable/visible toggles, stock state,
+  margin, an "Apply markup" quick action, and a **custom configuration plan**
+  builder that lets you pick which provider to quote (live, at your markup). OS
+  image table below.
+* **Orders** — the queue with a **provider column**, filters, per-order failure
+  reason, **retry** (re-drives with the same idempotency key and provider) and
+  **cancel**, plus **Order for a customer** (choose provider and billing mode).
+* **Fleet** — every provisioned server with its **provider**, owner, spec, IP,
+  state, retail vs cost vs margin, expiry, and suspend/unsuspend/renew actions.
 * **Customer credit** — balances per user, with a **Manage credit** drawer that
   shows the ledger and applies signed adjustments.
 * **Upstream API log** — the redacted request/response log for support.
 
-Top-right buttons: **Probe provider**, **Sync catalogue**, **Run reconciliation**.
+Top-right buttons: **Probe provider**, **Sync catalogue**, **Run
+reconciliation** — all scoped to the provider selected in the toolbar.
 
 ---
 
-## 9. REST API Reference
+## 10. REST API Reference
 
 All routes are mounted under `/api/v1/reseller` and require an authenticated
 principal (session, `Authorization: Bearer`, or `X-API-Key`). Mutations need the
@@ -271,7 +405,7 @@ GET  /wallet                          balance + recent ledger
 
 **Customer + staff (servers)**
 ```
-GET  /servers                         own servers (staff: ?all=1 or ?userId=)
+GET  /servers                         own servers (staff: ?all=1, ?userId=, ?providerId=)
 GET  /servers/:id                     server detail (?credentials=1 to reveal secrets)
 POST /servers/:id/power               { action: start | stop | restart }
 GET  /servers/:id/status              live power/uptime/cpu/mem/disk
@@ -290,13 +424,47 @@ POST /servers/:id/renew               renew now (owner only)
 
 **Orders**
 ```
-GET  /orders                          own orders (staff: ?all=1)
+GET  /orders                          own orders (staff: ?all=1&providerId=)
 GET  /orders/:id                      owner-or-staff
 ```
 
-**Staff / admin**
+**Staff / admin — providers (multiple reseller APIs)**
 ```
-GET  /admin/status                    ?probe=0|1  full health + aggregates
+GET    /admin/providers               ?probe=1  every provider + rollups
+GET    /admin/providers/:id           one provider (key hint only)
+POST   /admin/providers               { name, baseUrl, apiKey?, provider?,
+                                        markupPercent?, requestTimeoutMs?,
+                                        enabled?, storeEnabled?, makeDefault?,
+                                        notes? }                        → 201
+PUT    /admin/providers/:id           same fields; apiKey:"" clears the key
+DELETE /admin/providers/:id           admin-only; 409 provider_in_use
+POST   /admin/providers/:id/default   promote to the fallback provider
+POST   /admin/providers/:id/test-connection   probe GET /account
+POST   /admin/providers/sync          ?providerId= (omit to sync all)
+```
+
+Every provider response uses one shape (`serializeProvider`), never the raw row:
+
+```json
+{ "id": 2, "slug": "bukkit-eu", "name": "Bukkit EU", "provider": "bukkit-hosting",
+  "baseUrl": "https://eu.example.tld/api/v2", "keyHint": "ab12…wxyz",
+  "keyConfigured": true, "isDefault": true, "enabled": true, "storeEnabled": true,
+  "markupPercent": 20, "requestTimeoutMs": 20000,
+  "lastSyncAt": "2026-11-10 09:12:44", "lastProbeAt": "2026-11-10 09:20:01",
+  "lastBalanceCents": 48250, "lastError": null, "notes": null,
+  "plansTotal": 12, "plansEnabled": 11, "osImages": 6,
+  "serversTotal": 4, "serversActive": 3, "ordersPending": 1,
+  "monthlyRetailCents": 59960, "monthlyCostCents": 40000, "lowBalanceAlert": false }
+```
+
+`api_key_enc` is never serialised. `POST /admin/providers/sync` returns
+`{ ok, results: [{ providerId, providerName, plansUpserted, plansNew,
+osUpserted }], errors: [{ providerId, providerName, error }] }` — one provider
+failing does not abort the rest.
+
+**Staff / admin — panel**
+```
+GET  /admin/status                    ?probe=0|1&providerId=  health + aggregates
 GET  /admin/config                    current config (key hint only)
 PUT  /admin/config                    admin-only: update config / set-clear API key
 POST /admin/test-connection           verify the stored key against GET /account
@@ -307,11 +475,11 @@ POST /admin/plans/config              create a custom configuration plan
 GET  /admin/configurator              ?cpu=  provider configurator limits
 GET  /admin/configurator/price        live quote for a custom config
 GET  /admin/os-images                 all OS images
-GET  /admin/orders                    ?status=&limit=
+GET  /admin/orders                    ?status=&limit=&providerId=
 POST /admin/orders                    place an order for a customer
 POST /admin/orders/:id/retry          re-drive a pending/failed order
 POST /admin/orders/:id/cancel         cancel a queued order
-GET  /admin/servers                   whole fleet
+GET  /admin/servers                   whole fleet (?providerId= to scope)
 POST /admin/servers/:id/suspend       { suspend:true, reason }
 POST /admin/servers/:id/unsuspend
 POST /admin/servers/:id/renew
@@ -326,7 +494,7 @@ Errors use a consistent envelope:
 
 ---
 
-## 10. Upstream Error Codes & How They Map
+## 11. Upstream Error Codes & How They Map
 
 The client normalises the provider's `data.code` into friendly messages and
 decides whether an order failure is terminal or retryable.
@@ -351,7 +519,7 @@ Network/timeout failures become `network_error` (retryable) and leave orders
 
 ---
 
-## 11. Background Jobs
+## 12. Background Jobs
 
 `reseller.startBackgroundJobs()` is called during runtime bootstrap (guarded by
 `TGVPANEL_DISABLE_BACKGROUND_POLLER` / `TGVPANEL_DISABLE_RESELLER_POLLER`). Two
@@ -370,7 +538,7 @@ trigger either manually from the admin console at any time.
 
 ---
 
-## 12. Security Notes
+## 13. Security Notes
 
 * The **API key** and stored **root credentials** are encrypted with AES-256-GCM
   via the panel's crypto vault (`.tgvpanel-secret`). The key is only ever
@@ -387,7 +555,7 @@ trigger either manually from the admin console at any time.
 
 ---
 
-## 13. Testing Without a Live Key
+## 14. Testing Without a Live Key
 
 The whole feature is verifiable with no provider access:
 
@@ -413,7 +581,7 @@ TGVPANEL_DISABLE_BACKGROUND_POLLER=true TGVPANEL_DISABLE_RESELLER_POLLER=true no
 
 ---
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 | Symptom | Cause / fix |
 | --- | --- |

@@ -60,6 +60,16 @@ function intParam(value: unknown): number {
   return n;
 }
 
+/**
+ * Optional provider selector. Callers that omit it get the panel's default
+ * provider, exactly like before multi-provider support existed.
+ */
+function providerParam(req: Request): number | null {
+  const raw = req.query.providerId ?? (body(req) as Record<string, unknown>).providerId;
+  if (raw === undefined || raw === null || raw === '') return null;
+  return intParam(raw);
+}
+
 /** Wraps an async handler so rejections become consistent JSON errors. */
 function wrap(
   fn: (req: Request, res: Response) => Promise<unknown>
@@ -99,6 +109,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
       const outcome = await svc.previewOrder({
         userId: p.userId,
         planId: b.planId ? intParam(b.planId) : null,
+        providerId: providerParam(req),
         config: b.config || null,
         os: String(b.os || ''),
         name: b.name ? String(b.name) : null,
@@ -135,6 +146,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
       const outcome = await svc.placeOrder({
         userId: p.userId,
         planId: b.planId ? intParam(b.planId) : null,
+        providerId: providerParam(req),
         config: b.config || null,
         os: String(b.os),
         name: b.name ? String(b.name) : null,
@@ -178,6 +190,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
         userId,
         state: req.query.state ? String(req.query.state) : undefined,
         search: req.query.search ? String(req.query.search) : undefined,
+        providerId: providerParam(req),
       });
       res.json({
         servers: servers.map((s) => svc.serializeServer(s)),
@@ -387,6 +400,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
       const { orders, total } = await svc.listOrders({
         userId: staff && req.query.all === '1' ? undefined : p.userId,
         status: req.query.status ? String(req.query.status) : undefined,
+        providerId: providerParam(req),
         limit: req.query.limit ? intParam(req.query.limit) : 50,
       });
       res.json({ orders, total, scope: staff && req.query.all === '1' ? 'all' : 'own' });
@@ -406,6 +420,169 @@ export function createResellerApiRouter(svc: ResellerService): Router {
   );
 
   // -------------------------------------------------------------------------
+  // Staff: upstream providers (multiple reseller APIs)
+  // -------------------------------------------------------------------------
+
+  /** Every configured upstream provider with its latest health figures. */
+  router.get(
+    '/admin/providers',
+    requireStaff,
+    wrap(async (req, res) => {
+      const providers = await svc.getProviderSummaries({
+        probeUpstream: req.query.probe === '1' || req.query.probe === 'true',
+      });
+      res.json({ providers, total: providers.length });
+    })
+  );
+
+  router.get(
+    '/admin/providers/:id',
+    requireStaff,
+    wrap(async (req, res) => {
+      const provider = await svc.getProvider(intParam(req.params.id));
+      // serializeProvider never leaks the encrypted blob or the plaintext key.
+      res.json({ provider: svc.serializeProvider(provider) });
+    })
+  );
+
+  /** Adds another upstream reseller API (a second provider account). */
+  router.post(
+    '/admin/providers',
+    requireStaff,
+    wrap(async (req, res) => {
+      const p = principalOf(req);
+      const b = body(req);
+      const provider = await svc.createProvider({
+        name: String(b.name || ''),
+        slug: b.slug ? String(b.slug) : null,
+        provider: b.provider ? String(b.provider) : undefined,
+        baseUrl: String(b.baseUrl || ''),
+        apiKey: b.apiKey === undefined || b.apiKey === null ? null : String(b.apiKey),
+        enabled: b.enabled === undefined ? undefined : !!b.enabled,
+        storeEnabled: b.storeEnabled === undefined ? undefined : !!b.storeEnabled,
+        markupPercent:
+          b.markupPercent === undefined || b.markupPercent === '' ? null : Number(b.markupPercent),
+        requestTimeoutMs: b.requestTimeoutMs === undefined ? undefined : Number(b.requestTimeoutMs),
+        notes: b.notes ? String(b.notes) : null,
+        makeDefault: b.makeDefault === true,
+        actorId: p.userId,
+      });
+      res.status(201).json({ ok: true, provider: svc.serializeProvider(provider) });
+    })
+  );
+
+  router.put(
+    '/admin/providers/:id',
+    requireStaff,
+    wrap(async (req, res) => {
+      const p = principalOf(req);
+      const id = intParam(req.params.id);
+      const b = body(req);
+      const patch: Parameters<ResellerService['updateProvider']>[1] = { actorId: p.userId };
+      if (b.name !== undefined) patch.name = String(b.name);
+      if (b.baseUrl !== undefined) patch.baseUrl = String(b.baseUrl);
+      if (b.provider !== undefined) patch.provider = String(b.provider);
+      if (b.enabled !== undefined) patch.enabled = !!b.enabled;
+      if (b.storeEnabled !== undefined) patch.storeEnabled = !!b.storeEnabled;
+      if (b.markupPercent !== undefined) {
+        patch.markupPercent =
+          b.markupPercent === null || b.markupPercent === '' ? null : Number(b.markupPercent);
+      }
+      if (b.requestTimeoutMs !== undefined) patch.requestTimeoutMs = Number(b.requestTimeoutMs);
+      if (b.notes !== undefined) patch.notes = b.notes === null ? null : String(b.notes);
+      if (b.isDefault !== undefined) patch.isDefault = !!b.isDefault;
+      if (b.apiKey !== undefined) patch.apiKey = b.apiKey === null ? null : String(b.apiKey);
+
+      const provider = await svc.updateProvider(id, patch);
+      res.json({ ok: true, provider: svc.serializeProvider(provider) });
+    })
+  );
+
+  /** Removes a provider that no longer has servers or open orders. */
+  router.delete(
+    '/admin/providers/:id',
+    requireRole(['admin']),
+    wrap(async (req, res) => {
+      const p = principalOf(req);
+      await svc.deleteProvider(intParam(req.params.id), p.userId);
+      res.json({ ok: true });
+    })
+  );
+
+  router.post(
+    '/admin/providers/:id/default',
+    requireStaff,
+    wrap(async (req, res) => {
+      const provider = await svc.setDefaultProvider(intParam(req.params.id));
+      res.json({ ok: true, providerId: provider.id, name: provider.name, provider: svc.serializeProvider(provider) });
+    })
+  );
+
+  /** Probes one provider against `GET /account` and returns its status card. */
+  router.post(
+    '/admin/providers/:id/test-connection',
+    requireStaff,
+    wrap(async (req, res) => {
+      const id = intParam(req.params.id);
+      const status = await svc.getStatus({ probeUpstream: true, providerId: id });
+      res.json({
+        ok: status.upstream.reachable,
+        providerId: status.providerId,
+        providerName: status.providerName,
+        reachable: status.upstream.reachable,
+        error: status.upstream.error,
+        errorCode: status.upstream.errorCode,
+        account: status.upstream.account
+          ? {
+              userId: status.upstream.account.userId,
+              username: status.upstream.account.username,
+              email: status.upstream.account.email,
+              role: status.upstream.account.role,
+              state: status.upstream.account.state,
+              keyName: status.upstream.account.api?.keyName || null,
+            }
+          : null,
+        balanceCents: status.upstream.balanceCents,
+        currency: status.upstream.currency,
+        reseller: status.upstream.reseller,
+        resellerTier: status.upstream.resellerTier,
+        rateLimit: status.upstream.rateLimit,
+      });
+    })
+  );
+
+  /** Pulls the plan/OS catalogue for one provider (or all of them). */
+  router.post(
+    '/admin/providers/sync',
+    requireStaff,
+    wrap(async (req, res) => {
+      const p = principalOf(req);
+      const target = providerParam(req);
+      if (target) {
+        const result = await svc.syncCatalogue({ actorId: p.userId, providerId: target });
+        res.json({ ok: true, results: [result] });
+        return;
+      }
+      const providers = await svc.listProviders({ enabledOnly: true });
+      const results: unknown[] = [];
+      const errors: Array<{ providerId: number; name: string; error: string }> = [];
+      for (const provider of providers) {
+        if (!svc.resolveProviderApiKey(provider)) continue;
+        try {
+          results.push(await svc.syncCatalogue({ actorId: p.userId, providerId: provider.id }));
+        } catch (err) {
+          errors.push({
+            providerId: provider.id,
+            name: provider.name,
+            error: toResellerError(err).message,
+          });
+        }
+      }
+      res.json({ ok: errors.length === 0, results, errors });
+    })
+  );
+
+  // -------------------------------------------------------------------------
   // Staff: provider configuration, catalogue, queue, fleet, wallet
   // -------------------------------------------------------------------------
 
@@ -413,7 +590,10 @@ export function createResellerApiRouter(svc: ResellerService): Router {
     '/admin/status',
     requireStaff,
     wrap(async (req, res) => {
-      const status = await svc.getStatus({ probeUpstream: req.query.probe !== '0' });
+      const status = await svc.getStatus({
+        probeUpstream: req.query.probe !== '0',
+        providerId: providerParam(req),
+      });
       res.json(status);
     })
   );
@@ -542,7 +722,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
     requireStaff,
     wrap(async (req, res) => {
       const p = principalOf(req);
-      const result = await svc.syncCatalogue({ actorId: p.userId });
+      const result = await svc.syncCatalogue({ actorId: p.userId, providerId: providerParam(req) });
       res.json({ ok: true, ...result });
     })
   );
@@ -554,6 +734,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
       const plans = await svc.listPlans({
         enabledOnly: false,
         cpu: req.query.cpu ? String(req.query.cpu) : undefined,
+        providerId: providerParam(req),
       });
       res.json({ plans, total: plans.length });
     })
@@ -600,6 +781,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
       const b = body(req);
       if (!b.cpu) throw new ResellerError('cpu is required.', 422, 'invalid_config');
       const plan = await svc.createConfigPlan({
+        providerId: providerParam(req),
         cpu: String(b.cpu),
         cores: Number(b.cores),
         memory: Number(b.memory),
@@ -621,7 +803,10 @@ export function createResellerApiRouter(svc: ResellerService): Router {
     '/admin/configurator',
     requireStaff,
     wrap(async (req, res) => {
-      const configs = await svc.getConfigurator(req.query.cpu ? String(req.query.cpu) : undefined);
+      const configs = await svc.getConfigurator(
+        req.query.cpu ? String(req.query.cpu) : undefined,
+        providerParam(req)
+      );
       res.json({ configurator: configs });
     })
   );
@@ -640,6 +825,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
         ipv4: q.ipv4 === undefined ? undefined : Number(q.ipv4),
         ipv6: q.ipv6 === undefined ? undefined : Number(q.ipv6),
         markupPercent: q.markup === undefined || q.markup === '' ? null : Number(q.markup),
+        providerId: providerParam(req),
       });
       res.json(quote);
     })
@@ -648,8 +834,8 @@ export function createResellerApiRouter(svc: ResellerService): Router {
   router.get(
     '/admin/os-images',
     requireStaff,
-    wrap(async (_req, res) => {
-      const images = await svc.listOsImages({ enabledOnly: false });
+    wrap(async (req, res) => {
+      const images = await svc.listOsImages({ enabledOnly: false, providerId: providerParam(req) });
       res.json({ osImages: images });
     })
   );
@@ -660,6 +846,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
     wrap(async (req, res) => {
       const { orders, total } = await svc.listOrders({
         status: req.query.status ? String(req.query.status) : undefined,
+        providerId: providerParam(req),
         limit: req.query.limit ? intParam(req.query.limit) : 100,
         offset: req.query.offset ? Math.max(0, intParam(req.query.offset) - 1) : 0,
       });
@@ -709,6 +896,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
       const outcome = await svc.placeOrder({
         userId,
         planId: b.planId ? intParam(b.planId) : null,
+        providerId: providerParam(req),
         config: b.config || null,
         os: String(b.os || ''),
         name: b.name ? String(b.name) : null,
@@ -732,6 +920,7 @@ export function createResellerApiRouter(svc: ResellerService): Router {
       const servers = await svc.listCloudServers({
         state: req.query.state ? String(req.query.state) : undefined,
         search: req.query.search ? String(req.query.search) : undefined,
+        providerId: providerParam(req),
         limit: req.query.limit ? intParam(req.query.limit) : 200,
       });
       res.json({ servers: servers.map((s) => svc.serializeServer(s)), total: servers.length });
@@ -826,7 +1015,10 @@ export function createResellerApiRouter(svc: ResellerService): Router {
     '/admin/logs',
     requireStaff,
     wrap(async (req, res) => {
-      const logs = await svc.listApiLogs(req.query.limit ? intParam(req.query.limit) : 50);
+      const logs = await svc.listApiLogs(
+        req.query.limit ? intParam(req.query.limit) : 50,
+        providerParam(req)
+      );
       res.json({ logs });
     })
   );

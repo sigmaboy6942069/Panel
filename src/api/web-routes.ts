@@ -645,9 +645,14 @@ export function createUnifiedWebRouter(
    */
   router.get('/admin/reseller', ...adminStaffGuard, async (req: Request, res: Response) => {
     const sess: any = (req as any).session;
+    const providerId = req.query.providerId ? parseInt(String(req.query.providerId), 10) : null;
     const status = await ctx.reseller
-      .getStatus({ probeUpstream: req.query.probe !== '0' })
+      .getStatus({
+        probeUpstream: req.query.probe !== '0',
+        providerId: Number.isFinite(providerId as number) ? providerId : null,
+      })
       .catch(() => null);
+    const providers = await ctx.reseller.getProviderSummaries().catch(() => []);
     const plans = await ctx.reseller.listPlans({ enabledOnly: false }).catch(() => []);
     const osImages = await ctx.reseller.listOsImages({ enabledOnly: false }).catch(() => []);
     const orders = await ctx.reseller.listOrders({ limit: 50 }).catch(() => ({ orders: [], total: 0 }));
@@ -673,6 +678,7 @@ export function createUnifiedWebRouter(
       pageTitle: 'Reseller & Upstream Provisioning - TGVPANEL',
       user: res.locals.user || sess?.user || { username: sess?.username, role: sess?.role },
       status,
+      providers,
       plans,
       osImages,
       orders: orders.orders,
