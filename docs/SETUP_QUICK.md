@@ -83,14 +83,7 @@ sudo certbot --nginx -d panel.example.com --redirect
 The two `Upgrade`/`Connection` lines are not optional — the browser console and
 shell sessions are WebSockets and silently break without them.
 
-Now hide the panel from the public interface:
-
-```bash
-echo 'TGVPANEL_BIND_HOST=127.0.0.1' | sudo tee -a /opt/tgvpanel/.env
-sudo systemctl restart tgvpanel
-```
-
-From here the panel answers only through nginx on `https://panel.example.com`.
+From here the panel answers on `https://panel.example.com` through nginx.
 
 Firewall — three ports, that's all the panel needs:
 
@@ -99,14 +92,34 @@ sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
 sudo ufw enable && sudo ufw status verbose
 ```
 
-Confirm 8080 is really closed from outside:
+Confirm the domain works:
 
 ```bash
-curl -m 5 http://YOUR_SERVER_IP:8080/     # should fail to connect
+curl -m 5 -I https://panel.example.com/
 ```
 
-That failure is the goal. If it still responds, `TGVPANEL_BIND_HOST` didn't
-apply — check `/opt/tgvpanel/.env` and restart.
+### Optional: close port 8080 to the outside
+
+Right now nginx reaches the panel on `127.0.0.1:8080`, but the panel also
+listens on every other interface, so `http://YOUR_SERVER_IP:8080` answers too.
+That's plain HTTP — your password crosses the network in the clear.
+
+**Leave it open if you plan to put a Cloudflare Tunnel or another reverse proxy
+in front** — those reach the panel over `0.0.0.0` and will break on loopback.
+Close it only when nginx on this same machine is your only front door:
+
+```bash
+echo 'TGVPANEL_BIND_HOST=127.0.0.1' | sudo tee -a /opt/tgvpanel/.env
+sudo systemctl restart tgvpanel
+curl -m 5 http://YOUR_SERVER_IP:8080/     # should now fail to connect
+```
+
+To undo it later — for example when you switch to a tunnel — delete the line:
+
+```bash
+sudo sed -i '/^TGVPANEL_BIND_HOST=/d' /opt/tgvpanel/.env
+sudo systemctl restart tgvpanel
+```
 
 ---
 
@@ -317,8 +330,12 @@ Adjustable in `/opt/tgvpanel/.env`:
 ```ini
 TGVPANEL_LOGIN_MAX_FAILURES=10
 TGVPANEL_LOGIN_WINDOW_MS=900000
-TGVPANEL_BIND_HOST=127.0.0.1
 ```
+
+`TGVPANEL_BIND_HOST` is **not set by default** and the panel listens on
+`0.0.0.0`. Only add it if you are closing 8080 behind a local proxy — see step 2.
+Setting it to `127.0.0.1` while a tunnel or remote proxy is in front will make
+the panel unreachable.
 
 Keep `.tgvpanel-secret` — it decrypts stored credentials and session secrets. If
 you lose it, node keys and stored passwords become unreadable. Back it up, never

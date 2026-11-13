@@ -110,15 +110,47 @@ proxy_read_timeout 3600s;
 Without them the panel loads fine but consoles and shells disconnect the moment
 they open. That symptom looks like a bug in the panel; it's the proxy.
 
-### Binding to loopback
+### The bind address
+
+The panel listens on `0.0.0.0:8080` by default and nothing sets
+`TGVPANEL_BIND_HOST` unless you do. That default is deliberate: nginx, Caddy,
+Cloudflare Tunnel, `cloudflared`, Tailscale and every other reverse proxy can
+reach it without extra configuration.
+
+Setting it to loopback is an **optional hardening step**, and only safe when the
+proxy runs on the same machine:
 
 ```bash
+# Only if nginx here is your only front door.
 echo 'TGVPANEL_BIND_HOST=127.0.0.1' | sudo tee -a /opt/tgvpanel/.env
+sudo systemctl restart tgvpanel
 ```
 
-Default is `0.0.0.0` so a bare install is reachable by IP. Setting loopback means
-the only way in is nginx. This also makes the session cookie `Secure`, since the
-panel now sees HTTPS via `X-Forwarded-Proto` and `trust proxy`.
+**Do not set this if a tunnel or remote proxy is in front of the panel.** The
+tunnel connects over the network, so a loopback-bound panel is unreachable and
+the domain returns 502. This is the most common way to break a working install
+after reading a guide that assumes a local proxy.
+
+To undo:
+
+```bash
+sudo sed -i '/^TGVPANEL_BIND_HOST=/d' /opt/tgvpanel/.env
+sudo systemctl restart tgvpanel
+```
+
+`tee -a` appends without checking for duplicates. If you ran the line more than
+once, remove every copy before restarting:
+
+```bash
+grep -n BIND_HOST /opt/tgvpanel/.env    # should print nothing
+```
+
+Leaving `0.0.0.0` open means port 8080 serves the panel over plain HTTP as well
+as through TLS. Either firewall that port from the public internet, or keep it
+for a tunnel — but know which one you chose.
+
+The session cookie goes `Secure` based on `X-Forwarded-Proto`, which nginx and
+Cloudflare both set, so HTTPS still protects the session even while 8080 is open.
 
 ### Firewall
 
