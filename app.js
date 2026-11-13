@@ -6152,10 +6152,10 @@ async function bootstrapHkvmV3() {
 const hkvmReadyPromise = bootstrapHkvmV3()
   .then(() => {
     if (process.env.TGVPANEL_NO_LISTEN !== '1' && process.env.HKVM_NO_LISTEN !== '1') {
-      // Bind address. Default is loopback so the panel is only reachable
-      // through a TLS reverse proxy on the same host. Set TGVPANEL_BIND_HOST
-      // (or BIND_HOST) to 0.0.0.0 only if you really need to expose it.
-      const BIND_HOST = process.env.TGVPANEL_BIND_HOST || process.env.BIND_HOST || '127.0.0.1';
+      // Bind address. Defaults to all interfaces (unchanged behaviour); set
+      // TGVPANEL_BIND_HOST=127.0.0.1 to put the panel behind a local proxy, or
+      // to a tunnel IP (e.g. 10.90.0.1) to keep it off the public internet.
+      const BIND_HOST = process.env.TGVPANEL_BIND_HOST || process.env.BIND_HOST || '0.0.0.0';
       server.listen(Number(PORT), BIND_HOST, async () => {
         console.log('[License] Free Edition active');
 

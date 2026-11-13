@@ -265,6 +265,55 @@ Generate an internal CA, sign both a server certificate (for the remote node) an
 - `TGVPANEL_AGENT_TLS_CA=/etc/tgvpanel/ssl/ca.crt`
 - `TGVPANEL_NODE_MTLS=true`
 
+#### Option E: Outbound SSH Tunnel (no inbound port on the node)
+
+The agent does not need a public listener at all. With tunnel mode enabled the
+**controller** opens an outbound SSH connection to the node and forwards a local
+ephemeral port to the agent's loopback address. The node then accepts no inbound
+traffic beyond SSH, and the agent can bind to `127.0.0.1`.
+
+On the **node** (`/opt/tgvpanel/.env`):
+
+```ini
+TGVPANEL_AGENT_HOST=127.0.0.1
+TGVPANEL_AGENT_PORT=5055
+# No TLS needed: the transport is the SSH channel.
+```
+
+On the **controller** (`/opt/tgvpanel/.env`):
+
+```ini
+TGVPANEL_NODE_TUNNEL_ENABLED=true
+TGVPANEL_NODE_SSH_USER=root
+TGVPANEL_NODE_SSH_KEY=/opt/tgvpanel/.ssh/node_tunnel
+TGVPANEL_NODE_SSH_PORT=22
+TGVPANEL_NODE_AGENT_LOOPBACK_PORT=5055
+```
+
+```bash
+# Generate a key on the controller and authorize it on the node
+ssh-keygen -t ed25519 -f /opt/tgvpanel/.ssh/node_tunnel -N ""
+ssh-copy-id -i /opt/tgvpanel/.ssh/node_tunnel.pub root@NODE_IP
+chmod 600 /opt/tgvpanel/.ssh/node_tunnel
+```
+
+Then register the node with an Agent URL pointing at loopback; the controller
+substitutes its tunnel endpoint automatically:
+
+```ini
+Agent URL: http://127.0.0.1:5055
+```
+
+**What stays the same:** requests are still HMAC-signed and replay-guarded, so
+the tunnel is an additional layer, not a replacement for authentication. What
+goes away is the public `8443` listener, the certificate for it, and the
+firewall rule opening it.
+
+> Use a key with no passphrase (read by the panel at runtime) or set
+> `TGVPANEL_NODE_SSH_PASSPHRASE`. Keep it `0600` and outside the repo.
+
+---
+
 #### Option D: Private WireGuard / Private LAN (`http://`)
 If the Controller and Remote Node communicate exclusively over an encrypted WireGuard tunnel (e.g. `10.10.0.1` ↔ `10.10.0.2`), you can bind directly to the WireGuard IP (`TGVPANEL_AGENT_HOST=10.10.0.2`, `TGVPANEL_AGENT_PORT=5055`) without extra TLS paths and register `http://10.10.0.2:5055`. HMAC-SHA256 request signing and replay protection remain active on every request.
 

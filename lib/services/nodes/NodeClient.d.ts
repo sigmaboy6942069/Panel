@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import { UnifiedDatabase } from '../../db/database';
 import { LocalNodeRuntime } from '../../node-agent/agent';
+import { NodeTunnelManager } from './NodeTunnel';
 import { NodeHealthReport } from '../../node-agent/health';
 import { HostResourceStats } from '../../node-agent/host-stats';
 /**
@@ -103,6 +104,8 @@ export declare class NodeManager {
     private seenAgentHeartbeatNonces;
     private readonly failureThreshold;
     private readonly openCooldownMs;
+    /** SSH tunnels for nodes that expose nothing publicly. */
+    readonly tunnels: NodeTunnelManager;
     constructor(db: UnifiedDatabase, localRuntime?: LocalNodeRuntime);
     private normalizeTagsJson;
     private enrichNodeRow;
@@ -268,6 +271,30 @@ export declare class NodeManager {
     private recordCircuitSuccess;
     private recordCircuitFailure;
     private buildTlsOptionsForNode;
+    /**
+     * SSH tunnel settings for a node, or null when it is reached normally.
+     *
+     * Configured via environment / settings rather than the node row so the SSH
+     * key never lands in the database:
+     *   TGVPANEL_NODE_TUNNEL_ENABLED=true
+     *   TGVPANEL_NODE_SSH_USER=root
+     *   TGVPANEL_NODE_SSH_KEY=/opt/tgvpanel/.ssh/node_tunnel
+     *   TGVPANEL_NODE_SSH_PORT=22
+     *   TGVPANEL_NODE_AGENT_LOOPBACK_PORT=5055
+     */
+    resolveTunnelConfig(nodeId: number, node: NodeRecord): Promise<{
+        host: string;
+        port?: number;
+        username: string;
+        privateKey?: string;
+        privateKeyPath?: string;
+        passphrase?: string;
+        password?: string;
+        targetHost?: string;
+        targetPort: number;
+    } | null>;
+    /** Small settings reader shared by tunnel resolution. */
+    private getSetting;
     requestRemoteNode<T = any>(nodeId: number, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', pathWithQuery: string, body?: unknown, timeoutMs?: number, options?: {
         bypassCircuit?: boolean;
     }): Promise<T>;

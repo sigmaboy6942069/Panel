@@ -14,6 +14,7 @@ import {
   verifyAgentRequestSignature,
 } from '../../security/crypto-vault';
 import { LocalNodeRuntime } from '../../node-agent/agent';
+import { nodeTunnels, NodeTunnelManager } from './NodeTunnel';
 import { getNodeHealthReport, NodeHealthReport } from '../../node-agent/health';
 import { HostResourceStats } from '../../node-agent/host-stats';
 
@@ -243,6 +244,9 @@ export class NodeManager {
   private seenAgentHeartbeatNonces = new Map<string, number>();
   private readonly failureThreshold = 3;
   private readonly openCooldownMs = 30_000;
+
+  /** SSH tunnels for nodes that expose nothing publicly. */
+  public readonly tunnels: NodeTunnelManager = nodeTunnels;
 
   constructor(db: UnifiedDatabase, localRuntime?: LocalNodeRuntime) {
     this.db = db;
@@ -1717,6 +1721,84 @@ export class NodeManager {
     return out;
   }
 
+  /**
+   * SSH tunnel settings for a node, or null when it is reached normally.
+   *
+   * Configured via environment / settings rather than the node row so the SSH
+   * key never lands in the database:
+   *   TGVPANEL_NODE_TUNNEL_ENABLED=true
+   *   TGVPANEL_NODE_SSH_USER=root
+   *   TGVPANEL_NODE_SSH_KEY=/opt/tgvpanel/.ssh/node_tunnel
+   *   TGVPANEL_NODE_SSH_PORT=22
+   *   TGVPANEL_NODE_AGENT_LOOPBACK_PORT=5055
+   */
+  public async resolveTunnelConfig(
+    nodeId: number,
+    node: NodeRecord
+  ): Promise<{
+    host: string;
+    port?: number;
+    username: string;
+    privateKey?: string;
+    privateKeyPath?: string;
+    passphrase?: string;
+    password?: string;
+    targetHost?: string;
+    targetPort: number;
+  } | null> {
+    const enabled = await this.getSetting('node_tunnel_enabled');
+    const on = String(
+      enabled ?? process.env.TGVPANEL_NODE_TUNNEL_ENABLED ?? 'false'
+    ).toLowerCase();
+    if (on !== 'true' && on !== '1' && on !== 'yes') return null;
+
+    const username =
+      (await this.getSetting('node_ssh_user')) ||
+      process.env.TGVPANEL_NODE_SSH_USER ||
+      'root';
+    const keyPath =
+      (await this.getSetting('node_ssh_key')) ||
+      process.env.TGVPANEL_NODE_SSH_KEY ||
+      '';
+    const port = Number(
+      (await this.getSetting('node_ssh_port')) || process.env.TGVPANEL_NODE_SSH_PORT || 22
+    );
+    const targetPort = Number(
+      (await this.getSetting('node_agent_loopback_port')) ||
+        process.env.TGVPANEL_NODE_AGENT_LOOPBACK_PORT ||
+        5055
+    );
+
+    // SSH host is the node's IPv4 address; the agent URL is intentionally
+    // loopback-only in tunnel mode, so never dial it directly.
+    const host = String(node.ip_address || '').trim();
+    if (!host) return null;
+
+    return {
+      host,
+      port,
+      username,
+      privateKeyPath: keyPath || undefined,
+      passphrase: process.env.TGVPANEL_NODE_SSH_PASSPHRASE,
+      password: process.env.TGVPANEL_NODE_SSH_PASSWORD,
+      targetHost: '127.0.0.1',
+      targetPort,
+    };
+  }
+
+  /** Small settings reader shared by tunnel resolution. */
+  private async getSetting(key: string): Promise<string | null> {
+    try {
+      const row = await this.db.get<{ setting_value: string }>(
+        `SELECT setting_value FROM settings WHERE setting_key = ?`,
+        [key]
+      );
+      return row?.setting_value ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   public async requestRemoteNode<T = any>(
     nodeId: number,
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
@@ -1766,13 +1848,26 @@ export class NodeManager {
       bodyBuffer: rawBody,
     });
 
-    const isHttps = targetUrl.protocol === 'https:';
+    // A tunneled node publishes nothing publicly: swap the target for the local
+    // end of an outbound SSH forward before building the request.
+    let dialHostname = targetUrl.hostname;
+    let dialPort = Number(targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80));
+    let tinted = false;
+    const tunnelConfig = await this.resolveTunnelConfig(nodeId, node);
+    if (tunnelConfig) {
+      const tunnelUrl = new URL(await this.tunnels.getTunnelUrl(nodeId, tunnelConfig));
+      dialHostname = tunnelUrl.hostname;
+      dialPort = Number(tunnelUrl.port);
+      tinted = true;
+    }
+
+    const isHttps = targetUrl.protocol === 'https:' && !tinted;
 
     return new Promise<T>((resolve, reject) => {
       const reqOpts: https.RequestOptions = {
         method,
-        hostname: targetUrl.hostname,
-        port: targetUrl.port || (isHttps ? 443 : 80),
+        hostname: dialHostname,
+        port: dialPort,
         path: fullPathWithQuery,
         headers: {
           Accept: 'application/json',
