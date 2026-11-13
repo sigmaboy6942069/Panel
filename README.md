@@ -11,7 +11,7 @@ Multi-node · Secure by default · Pure Node.js + TypeScript
 ![Virtualization](https://img.shields.io/badge/QEMU%2FKVM-%2B%20LXC-orange)
 
 [Quick Start](#quick-start) ·
-[Multi-Node Setup Guide](docs/MULTINODE_SETUP.md) ·
+[Quick Start](docs/SETUP_QUICK.md) · [Detailed Reference](docs/SETUP_DETAILED.md) ·
 [Features](#features) ·
 [Architecture](#architecture) ·
 [Node Agent](#remote-node-agent) ·
@@ -162,7 +162,11 @@ npm run import:hvm -- /path/to/legacy.db
 
 ## Remote node agent
 
-> **Full step-by-step guide:** See [**`docs/MULTINODE_SETUP.md`**](docs/MULTINODE_SETUP.md) for complete Single-Node & Multi-Node setup instructions (firewall rules, NTP sync, TLS / self-signed / Let's Encrypt / mTLS / WireGuard, systemd service, storage & networking setup, cross-node migration, live key rotation, and troubleshooting).
+> **Setup docs:** start with [**`docs/SETUP_QUICK.md`**](docs/SETUP_QUICK.md) for the
+> command sequence (panel, HTTPS, nodes, selling your own nodes). Deeper material —
+> all node transports incl. the outbound SSH tunnel and WireGuard, environment
+> variables, migrations, troubleshooting and recovery — is in
+> [**`docs/SETUP_DETAILED.md`**](docs/SETUP_DETAILED.md).
 
 Run the agent on any compute host you want the panel to manage:
 
