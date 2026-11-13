@@ -12,6 +12,7 @@ Multi-node · Secure by default · Pure Node.js + TypeScript
 
 [Quick Start](#quick-start) ·
 [Quick Start](docs/SETUP_QUICK.md) · [Detailed Reference](docs/SETUP_DETAILED.md) ·
+[2FA & Social Login](docs/AUTH_AND_SIGNIN.md) ·
 [Features](#features) ·
 [Architecture](#architecture) ·
 [Node Agent](#remote-node-agent) ·
@@ -38,6 +39,7 @@ TGVPANEL is a single platform for managing both virtual machines and containers,
 | **Consoles** | Interactive container PTY via `node-pty` + `lxc-attach`; xterm.js served locally (no CDN); opt-in, audited admin node shell |
 | **Storage** | Pools (RAW, QCOW2, directory, LVM, ZFS, Btrfs), ISO library, LXC OS template catalog |
 | **Networking** | Bridges, NAT, IPv4/IPv6 pools, port forwards, bandwidth limits, iptables changes with rollback |
+| **Sign-in** | Password + TOTP two-factor with single-use recovery codes; optional Google, Discord and GitHub OAuth with PKCE and takeover-safe account linking |
 | **Backups** | KVM QCOW2 and LXC snapshots, SHA-256 verified `tar.gz` backups, scheduled backups |
 | **Migration** | 7-stage offline snapshot-transfer with automatic rollback ([details](#vps-migration-model)) |
 | **Monitoring** | Live and historical node/VPS metrics, alert rules, notifications, webhooks |

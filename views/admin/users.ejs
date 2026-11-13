@@ -238,6 +238,7 @@ function renderUsers() {
                 <button class="btn btn-secondary btn-sm" onclick="impersonateUser(${u.id}, '${escHtml(u.username)}')" title="Impersonate user session (audited)">
                   <i class="fas fa-user-secret"></i> Impersonate
                 </button>
+                ${u.two_factor_enabled ? `<button class="btn btn-secondary btn-sm" onclick="resetTwoFactor(${u.id}, '${escHtml(u.username)}')" title="Clear this user's 2FA so they can enrol again"><i class="fas fa-shield-halved"></i> Reset 2FA</button>` : ''}
                 ${u.id === 1 ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${escHtml(u.username)}')"><i class="fas fa-trash"></i> Delete</button>`}
               </div>
             </td>
@@ -265,6 +266,21 @@ async function impersonateUser(id, username) {
 }
 
 async function deleteUser(id, username) {
+  async function resetTwoFactor(userId, username) {
+    if (!confirm(`Reset two-factor authentication for "${username}"?\n\nThey will be able to sign in with just their password until they set it up again. Only do this if they have lost both their device and their recovery codes.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/reset-2fa`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      showToast('Two-factor authentication cleared for ' + username, 'success');
+      loadUsers();
+    } catch (e) {
+      showToast('Reset failed: ' + e.message, 'error');
+    }
+  }
+
   const confirmed = confirm(`Delete user "${username}"? This action cannot be undone.`);
   if (!confirmed) return;
   

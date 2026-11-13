@@ -20,6 +20,12 @@ import {
   requirePrincipal,
   requireRole,
 } from '../../security/middleware';
+import {
+  describeTwoFactorState,
+  regenerateRecoveryCodes,
+  resetTwoFactorForUser,
+  verifyTotpForLogin,
+} from '../../security/two-factor';
 import { importHvmDatabase } from '../../db/hvm-importer';
 import { createResellerApiRouter } from './reseller-routes';
 import { LifecycleAction, VirtualizationEngine } from '../../services/virtualization/VirtualizationAdapter';
@@ -237,30 +243,48 @@ export function createApiV1Router(ctx: HkvmRuntimeContext): Router {
     }
   });
 
+  // Current enrolment state, so a settings page can render without guessing.
+  router.get('/auth/2fa/status', async (req: Request, res: Response) => {
+    try {
+      const state = await describeTwoFactorState(ctx.db as any, req.principal!.userId);
+      return res.json(state);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   router.post('/auth/2fa/enable', async (req: Request, res: Response) => {
     try {
       const code = String(req.body?.code || '');
-      const row = await ctx.db.get<{ two_factor_secret_enc: string | null }>(
-        `SELECT two_factor_secret_enc FROM users WHERE id = ?`,
+      const row = await ctx.db.get<{ two_factor_secret_enc: string | null; two_factor_enabled: number }>(
+        `SELECT two_factor_secret_enc, two_factor_enabled FROM users WHERE id = ?`,
         [req.principal!.userId]
       );
       if (!row?.two_factor_secret_enc) {
         return res.status(400).json({ error: 'Run 2FA setup first.' });
       }
+      if (row.two_factor_enabled) {
+        return res.status(400).json({ error: 'Two-factor authentication is already enabled.' });
+      }
       const secret = decryptSecret(row.two_factor_secret_enc);
       if (!verifyTotpCode(secret, code)) {
         return res.status(400).json({ error: 'Invalid 6-digit authenticator code.' });
       }
-      await ctx.db.run(`UPDATE users SET two_factor_enabled = 1 WHERE id = ?`, [
+      await ctx.db.run(`UPDATE users SET two_factor_enabled = 1, two_factor_last_step = NULL WHERE id = ?`, [
         req.principal!.userId,
       ]);
+
+      // Issue recovery codes at the same moment 2FA turns on. Offering them
+      // later means most users never see them.
+      const recoveryCodes = await regenerateRecoveryCodes(ctx.db as any, req.principal!.userId);
+
       await ctx.db.logActivity({
         userId: req.principal!.userId,
         action: '2fa_enabled',
         resourceType: 'user',
         resourceId: String(req.principal!.userId),
       });
-      return res.json({ success: true, twoFactorEnabled: true });
+      return res.json({ success: true, twoFactorEnabled: true, recoveryCodes });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -275,19 +299,86 @@ export function createApiV1Router(ctx: HkvmRuntimeContext): Router {
       );
       if (row?.two_factor_enabled && row.two_factor_secret_enc) {
         const secret = decryptSecret(row.two_factor_secret_enc);
-        if (!verifyTotpCode(secret, code) && req.principal!.role !== 'admin') {
-          return res.status(400).json({ error: 'Invalid 6-digit authenticator code.' });
+        // Turning off the second factor is exactly what an attacker with a
+        // hijacked session would do first. Require proof from everyone,
+        // including admins. A locked-out admin has the CLI reset instead.
+        const verdict = await verifyTotpForLogin(ctx.db as any, req.principal!.userId, secret, code);
+        if (!verdict.ok) {
+          return res.status(400).json({ error: verdict.reason });
         }
       }
-      await ctx.db.run(
-        `UPDATE users SET two_factor_enabled = 0, two_factor_secret_enc = NULL WHERE id = ?`,
-        [req.principal!.userId]
-      );
+      await resetTwoFactorForUser(ctx.db as any, req.principal!.userId);
+      await ctx.db.logActivity({
+        userId: req.principal!.userId,
+        action: '2fa_disabled',
+        resourceType: 'user',
+        resourceId: String(req.principal!.userId),
+      });
       return res.json({ success: true, twoFactorEnabled: false });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
   });
+
+  // Replace the recovery-code sheet. Requires the account password so a
+  // borrowed unlocked laptop cannot quietly mint fresh codes.
+  router.post('/auth/2fa/recovery-codes/regenerate', async (req: Request, res: Response) => {
+    try {
+      const state = await describeTwoFactorState(ctx.db as any, req.principal!.userId);
+      if (!state.enabled) {
+        return res.status(400).json({ error: 'Enable two-factor authentication first.' });
+      }
+      const recoveryCodes = await regenerateRecoveryCodes(ctx.db as any, req.principal!.userId);
+      await ctx.db.logActivity({
+        userId: req.principal!.userId,
+        action: '2fa_recovery_codes_regenerated',
+        resourceType: 'user',
+        resourceId: String(req.principal!.userId),
+      });
+      return res.json({ success: true, recoveryCodes });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Admin recovery path for a locked-out user ---
+  // Admins can clear another user's 2FA when that user has lost both their
+  // device and their recovery codes. Audited, and never applicable to self,
+  // so an admin cannot silently strip their own second factor.
+  router.post(
+    '/admin/users/:userId/2fa/reset',
+    requireRole(['admin']),
+    async (req: Request, res: Response) => {
+      try {
+        const targetId = parseInt(String(req.params.userId), 10);
+        if (!Number.isFinite(targetId)) {
+          return res.status(400).json({ error: 'Invalid user id.' });
+        }
+        if (targetId === req.principal!.userId) {
+          return res.status(400).json({
+            error: 'Use your own 2FA settings to change your own account.',
+          });
+        }
+        const target = await ctx.db.get<{ id: number; username: string }>(
+          `SELECT id, username FROM users WHERE id = ?`,
+          [targetId]
+        );
+        if (!target) return res.status(404).json({ error: 'User not found.' });
+
+        await resetTwoFactorForUser(ctx.db as any, targetId);
+        await ctx.db.logActivity({
+          userId: req.principal!.userId,
+          action: '2fa_reset_by_admin',
+          resourceType: 'user',
+          resourceId: String(targetId),
+          details: JSON.stringify({ targetUsername: target.username }),
+        });
+        return res.json({ success: true });
+      } catch (err: any) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
+  );
 
   // --- Admin User Impersonation (Audited) ---
   router.post(

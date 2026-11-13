@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title || 'Confirm account link' %></title>
+  <link rel="icon" href="<%= typeof siteLogo !== 'undefined' ? siteLogo : '/images/logo.png' %>" type="image/png">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg-primary,#09090f);padding:20px;">
+  <div style="width:100%;max-width:440px;background:var(--bg-card,#12121d);border:1px solid var(--border-card,rgba(255,255,255,0.08));border-radius:16px;padding:28px;">
+
+    <h2 style="margin:0 0 8px;color:var(--text-primary,#fff);font-size:19px;">Confirm this is your account</h2>
+
+    <p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:var(--text-secondary,#cbd5e1);">
+      <strong style="text-transform:capitalize;"><%= provider %></strong> reports the email
+      <strong><%= email || '(none)' %></strong>, which matches an existing account on this panel.
+      <% if (email) { %>
+        The provider has not verified that address, so we cannot link automatically.
+      <% } %>
+      Enter that account's password to attach your <span style="text-transform:capitalize;"><%= provider %></span> login to it.
+    </p>
+
+    <form onsubmit="linkAccount(event)">
+      <label style="display:block;font-size:12px;color:var(--text-muted,#9ca3af);margin-bottom:6px;">Account password</label>
+      <input id="password" type="password" required autofocus autocomplete="current-password"
+             style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border-color,#2d2d3d);background:rgba(0,0,0,0.3);color:#fff;margin-bottom:12px;box-sizing:border-box;">
+
+      <div id="errMsg" style="color:#ef4444;font-size:13px;margin-bottom:10px;display:none;"></div>
+
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;">
+        Link and sign in
+      </button>
+    </form>
+
+    <p style="margin:16px 0 0;text-align:center;">
+      <a href="/login" style="font-size:12px;color:var(--text-muted,#9ca3af);">
+        Not you? Start over
+      </a>
+    </p>
+  </div>
+
+  <script>
+    const CSRF = '<%= csrfToken %>';
+
+    async function linkAccount(e) {
+      e.preventDefault();
+      const errEl = document.getElementById('errMsg');
+      const btn = e.target.querySelector('button[type="submit"]');
+      errEl.style.display = 'none';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/link-oauth-account', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+          body: JSON.stringify({ password: document.getElementById('password').value })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          errEl.textContent = data.error || 'Could not link the account.';
+          errEl.style.display = 'block';
+          return;
+        }
+        window.location.href = data.redirectUrl || '/dashboard';
+      } catch (err) {
+        errEl.textContent = 'Could not reach the server.';
+        errEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>

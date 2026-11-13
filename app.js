@@ -56,6 +56,7 @@ const { securityHeadersAndCsrfMiddleware, verifyCsrfMiddleware, createUnifiedAut
 const { initializeUnifiedHkvmRuntime, attachUnifiedWebSockets } = require('./lib/context');
 const { createApiV1Router } = require('./lib/api/v1/router');
 const { createUnifiedWebRouter } = require('./lib/api/web-routes');
+const { createOAuthRouter } = require('./lib/api/oauth-routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -65,6 +66,7 @@ let hkvmV3Context = null;
 let v3PrincipalMiddleware = null;
 let v3ApiRouter = null;
 let v3WebRouter = null;
+let oauthRouter = null;
 
 // Unified TGVPANEL SQLite store inside ./data/tgvpanel.db (auto-migrates legacy ./data/hkvm.db)
 const dbDir =
@@ -521,6 +523,12 @@ app.use('/api/v1', verifyCsrfMiddleware, (req, res, next) => {
   if (v3ApiRouter) return v3ApiRouter(req, res, next);
   res.status(503).json({ error: 'TGVPANEL runtime is initializing' });
 });
+// Third-party sign-in. Registered ahead of the web router so /auth/* is not
+// shadowed by any catch-all that runs later in the chain.
+app.use((req, res, next) => {
+  if (oauthRouter) return oauthRouter(req, res, next);
+  next();
+});
 app.use((req, res, next) => {
   if (v3WebRouter) return v3WebRouter(req, res, next);
   next();
@@ -878,32 +886,61 @@ app.post('/api/login', loginThrottle, (req, res) => {
         redirectTo: '/login/2fa'
       });
     }
-    
-    // Update last login
-    db.run(`UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?`, [user.id], (err) => {
-      if (err) console.error('[DB Error] Failed to update last_login:', err);
-    });
-    
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    req.session.role = user.role;
-    req.session.user = { id: user.id, username: user.username, role: user.role };
-    if (hkvmV3Context) {
-      hkvmV3Context.db
-        .logActivity({
-          userId: user.id,
-          action: 'auth.login',
-          resourceType: 'user',
-          resourceId: user.id,
-          ipAddress: req.ip
-        })
-        .catch(() => undefined);
-    }
-    console.log(`[Auth Success] User ${user.id} (${user.username}) logged in with role: ${user.role}`);
-    if (typeof req.clearLoginFailures === 'function') req.clearLoginFailures();
-    res.json({ success: true, user: { id: user.id, username: user.username, role: user.role } });
+
+    // Not enrolled. If the admin policy demands 2FA for this role, the account
+    // cannot be used until it is set up -- otherwise "enforce 2FA" would be
+    // bypassed simply by never enrolling.
+    db.get(
+      `SELECT setting_value FROM settings WHERE setting_key = 'require_2fa_for_admins'`,
+      [],
+      (polErr, pol) => {
+        if (polErr) console.error('[Auth Error] 2FA policy lookup failed:', polErr.message);
+        const policyOn = String(pol?.setting_value || '0') === '1';
+        if (policyOn && (user.role === 'admin' || user.role === 'subadmin')) {
+          req.session.pending2faUser = {
+            id: user.id,
+            username: user.username,
+            role: user.role,
+            email: user.email
+          };
+          return res.json({
+            success: true,
+            requiresSetup2FA: true,
+            redirectTo: '/settings/2fa?required=1'
+          });
+        }
+        completePasswordLogin(user, res, req);
+      }
+    );
   });
 });
+
+// Everything that happens after the first factor has been satisfied.
+// Kept as one function so password login and OAuth login cannot drift apart.
+function completePasswordLogin(user, res, req) {
+  db.run(`UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?`, [user.id], (err) => {
+    if (err) console.error('[DB Error] Failed to update last_login:', err);
+  });
+
+  req.session.userId = user.id;
+  req.session.username = user.username;
+  req.session.role = user.role;
+  req.session.user = { id: user.id, username: user.username, role: user.role };
+  if (hkvmV3Context) {
+    hkvmV3Context.db
+      .logActivity({
+        userId: user.id,
+        action: 'auth.login',
+        resourceType: 'user',
+        resourceId: user.id,
+        ipAddress: req.ip
+      })
+      .catch(() => undefined);
+  }
+  console.log(`[Auth Success] User ${user.id} (${user.username}) logged in with role: ${user.role}`);
+  if (typeof req.clearLoginFailures === 'function') req.clearLoginFailures();
+  res.json({ success: true, user: { id: user.id, username: user.username, role: user.role } });
+}
 
 app.post('/api/logout', (req, res) => {
   console.log(`[Auth] User ${req.session.userId} (${req.session.username}) logged out`);
@@ -1035,16 +1072,12 @@ app.get('/auth/discord/callback', async (req, res) => {
           if (err || !user) {
             return res.redirect('/login?error=User not found');
           }
+          if (!user.is_active) {
+            return res.redirect('/login?error=This account has been disabled');
+          }
 
-          // Update last login
-          db.run(`UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?`, [user.id]);
-
-          req.session.userId = user.id;
-          req.session.username = user.username;
-          req.session.role = user.role;
-
-          console.log(`[Discord Auth] User ${user.username} (${user.id}) logged in via Discord`);
-          res.redirect('/dashboard');
+          console.log(`[Discord Auth] User ${user.username} (${user.id}) authorised via Discord`);
+          completeOAuthLogin(user, req, res, { provider: 'discord', subject: discordId });
         });
       } else {
         // Check if email exists in system
@@ -1089,8 +1122,76 @@ app.get('/auth/discord/callback', async (req, res) => {
   }
 });
 
+/**
+ * Single gate every third-party sign-in must pass through.
+ *
+ * OAuth proves *who* the user is, not that they hold the second factor. An
+ * attacker who steals a Discord session, or who controls an account with the
+ * same verified email, would otherwise skip TOTP entirely. So the same
+ * `pending2faUser` handshake used by password login is applied here.
+ *
+ * Also regenerates the session id, because a pre-login session that merely gets
+ * `userId` bolted onto it is a session-fixation target.
+ */
+function completeOAuthLogin(user, req, res, providerInfo) {
+  const finish = () => {
+    req.session.regenerate((regenErr) => {
+      if (regenErr) console.error('[OAuth Auth] Session regenerate failed:', regenErr);
+
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      req.session.role = user.role;
+      req.session.user = { id: user.id, username: user.username, role: user.role };
+
+      db.run(`UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?`, [user.id]);
+      if (hkvmV3Context && providerInfo) {
+        hkvmV3Context.db
+          .logActivity({
+            userId: user.id,
+            action: `auth.login.${providerInfo.provider}`,
+            resourceType: 'user',
+            resourceId: user.id,
+            ipAddress: req.ip
+          })
+          .catch(() => undefined);
+      }
+
+      console.log(`[OAuth Auth] User ${user.username} (${user.id}) logged in via ${providerInfo?.provider || 'oauth'}`);
+      return res.redirect(user.role === 'admin' ? '/admin/dashboard' : '/dashboard');
+    });
+  };
+
+  if (user.two_factor_enabled && user.two_factor_secret_enc) {
+    // Park the identity, do not authenticate yet.
+    req.session.pending2faUser = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      email: user.email
+    };
+    return res.redirect('/login/2fa');
+  }
+
+  // Enforced-policy path: admin/subadmin without 2FA must enrol first.
+  db.get(
+    `SELECT setting_value FROM settings WHERE setting_key = 'require_2fa_for_admins'`,
+    [],
+    (polErr, pol) => {
+      if (polErr) console.error('[OAuth Auth] 2FA policy lookup failed:', polErr.message);
+      const policyOn = String(pol?.setting_value || '0') === '1';
+      if (policyOn && (user.role === 'admin' || user.role === 'subadmin')) {
+        req.session.userId = user.id;
+        req.session.username = user.username;
+        req.session.role = user.role;
+        req.session.mustSetup2FA = true;
+        return res.redirect('/settings/2fa?required=1');
+      }
+      finish();
+    }
+  );
+}
+
 function createDiscordUser(discordId, discordUsername, discordEmail, discordAvatar, res, req) {
-  // Generate a random password (user won't use it for Discord login)
   const tempPassword = require('crypto').randomBytes(16).toString('hex');
   const hashedPassword = bcrypt.hashSync(tempPassword, 10);
 
@@ -1115,15 +1216,13 @@ function createDiscordUser(discordId, discordUsername, discordEmail, discordAvat
             return res.redirect('/login?error=Failed to link account');
           }
 
-          // Log them in
-          db.run(`UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?`, [userId]);
-
-          req.session.userId = userId;
-          req.session.username = discordUsername;
-          req.session.role = 'user';
-
           console.log(`[Discord Auth] New user ${discordUsername} (${userId}) created via Discord`);
-          res.redirect('/dashboard');
+          completeOAuthLogin(
+            { id: userId, username: discordUsername, role: 'user', email: discordEmail, is_active: 1 },
+            req,
+            res,
+            { provider: 'discord', subject: discordId }
+          );
         }
       );
     }
@@ -2008,6 +2107,150 @@ app.get('/profile', checkAuth, (req, res) => {
   });
 });
 
+// Two-factor enrolment page. Reachable while signed in, and also reachable
+// straight after login when an admin policy demands enrolment.
+app.get('/settings/2fa', checkAuth, (req, res) => {
+  res.render('users/settings-2fa', {
+    title: 'Two-Factor Authentication - TGVPANEL',
+    required: req.query.required === '1' || Boolean(req.session.mustSetup2FA),
+    csrfToken: res.locals.csrfToken || '',
+  });
+});
+
+// Confirmation step for a provider whose email the provider does not vouch for.
+// The user proves ownership of the existing account with its password before
+// the external identity is attached.
+app.get('/link-oauth-account', (req, res) => {
+  const pending = req.session.pendingOAuthLink;
+  if (!pending) return res.redirect('/login');
+  res.render('users/link-oauth-account', {
+    title: 'Confirm account link - TGVPANEL',
+    provider: pending.provider,
+    email: pending.email,
+    csrfToken: res.locals.csrfToken || '',
+  });
+});
+
+app.post('/api/link-oauth-account', async (req, res) => {
+  const pending = req.session.pendingOAuthLink;
+  if (!pending) return res.status(400).json({ error: 'No pending link request.' });
+
+  try {
+    const user = await hkvmV3Context.db.get(`SELECT * FROM users WHERE id = ?`, [pending.userId]);
+    if (!user) return res.status(400).json({ error: 'Account no longer exists.' });
+
+    const verdict = verifyPasswordWithLegacySupport(String(req.body?.password || ''), user.password);
+    if (!verdict.valid) {
+      return res.status(401).json({ error: 'Incorrect password.' });
+    }
+
+    await hkvmV3Context.db.run(
+      `INSERT INTO oauth_identities
+         (user_id, provider, subject, email, email_verified, display_name, avatar_url, last_login_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(provider, subject) DO UPDATE SET
+         user_id = excluded.user_id,
+         email = excluded.email,
+         display_name = excluded.display_name,
+         avatar_url = excluded.avatar_url,
+         last_login_at = CURRENT_TIMESTAMP`,
+      [pending.userId, pending.provider, pending.subject, pending.email,
+       pending.displayName, pending.avatarUrl]
+    );
+    await hkvmV3Context.db.logActivity({
+      userId: pending.userId,
+      action: `auth.link.${pending.provider}`,
+      resourceType: 'user',
+      resourceId: String(pending.userId),
+      ipAddress: req.ip
+    });
+
+    delete req.session.pendingOAuthLink;
+
+    if (user.two_factor_enabled && user.two_factor_secret_enc) {
+      req.session.pending2faUser = {
+        id: user.id, username: user.username, role: user.role, email: user.email
+      };
+      return res.json({ success: true, redirectUrl: '/login/2fa' });
+    }
+
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    req.session.role = user.role;
+    req.session.user = { id: user.id, username: user.username, role: user.role };
+    return res.json({
+      success: true,
+      redirectUrl: user.role === 'admin' ? '/admin/dashboard' : '/dashboard'
+    });
+  } catch (err) {
+    console.error('[OAuth Link] failed:', err.message);
+    return res.status(500).json({ error: 'Could not link the account.' });
+  }
+});
+
+// Which external accounts are attached to the signed-in user.
+app.get('/api/my/linked-accounts', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Not signed in.' });
+  try {
+    const rows = await hkvmV3Context.db.all(
+      `SELECT provider, email, display_name, avatar_url, created_at, last_login_at
+       FROM oauth_identities WHERE user_id = ? ORDER BY provider`,
+      [req.session.userId]
+    );
+    const enabledRows = await hkvmV3Context.db.all(
+      `SELECT provider FROM oauth_provider_settings WHERE enabled = 1`
+    );
+    res.json({
+      linked: rows,
+      available: enabledRows.map((r) => r.provider)
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Detaching the only way into an account would lock the user out, so require
+// that either a password is set or another provider stays attached.
+app.post('/api/my/unlink-account/:provider', async (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Not signed in.' });
+  const provider = String(req.params.provider || '').toLowerCase();
+  if (!['google', 'discord', 'github'].includes(provider)) {
+    return res.status(400).json({ error: 'Unknown provider.' });
+  }
+  try {
+    const user = await hkvmV3Context.db.get(`SELECT * FROM users WHERE id = ?`, [req.session.userId]);
+    if (!user) return res.status(404).json({ error: 'Account not found.' });
+
+    const remaining = await hkvmV3Context.db.get(
+      `SELECT COUNT(*) AS n FROM oauth_identities WHERE user_id = ? AND provider != ?`,
+      [req.session.userId, provider]
+    );
+    // Accounts created through a provider have a random password nobody knows,
+    // so they depend on a linked identity. Refuse to strand them.
+    const hasUsablePassword = Boolean(user.password) && !user.oauth_only;
+    if (!hasUsablePassword && Number(remaining?.n || 0) === 0) {
+      return res.status(400).json({
+        error: 'This is your only way to sign in. Set a password first, then unlink.'
+      });
+    }
+
+    const result = await hkvmV3Context.db.run(
+      `DELETE FROM oauth_identities WHERE user_id = ? AND provider = ?`,
+      [req.session.userId, provider]
+    );
+    await hkvmV3Context.db.logActivity({
+      userId: req.session.userId,
+      action: `auth.unlink.${provider}`,
+      resourceType: 'user',
+      resourceId: String(req.session.userId),
+      ipAddress: req.ip
+    });
+    res.json({ success: true, removed: Number(result?.changes || 0) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============= API ROUTES =============
 
 // Get list of users for dropdown/assignment (accessible to admins)
@@ -2019,10 +2262,17 @@ app.get('/api/users/list', checkAuth, checkAdmin, (req, res) => {
 });
 
 app.get('/api/admin/users', checkAuth, checkAdmin, (req, res) => {
-  db.all(`SELECT id, username, email, role, created_at, is_active FROM users`, (err, users) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(users);
-  });
+  // two_factor_enabled drives the "Reset 2FA" button, which only makes sense
+  // for accounts that actually have it turned on.
+  db.all(
+    `SELECT id, username, email, role, created_at, is_active,
+            COALESCE(two_factor_enabled, 0) AS two_factor_enabled
+     FROM users`,
+    (err, users) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(users);
+    }
+  );
 });
 
 // Get single user
@@ -5295,6 +5545,250 @@ app.put('/api/settings', checkAuth, checkAdmin, (req, res) => {
 // ============= DISCORD SETTINGS API =============
 
 // Get Discord settings (admin only)
+// ============= OAUTH PROVIDER SETTINGS (Google / Discord / GitHub) =============
+
+const OAUTH_PROVIDER_IDS = ['google', 'discord', 'github'];
+
+// Never return the stored client secret. Only whether one is set.
+function publicProviderSettings(row) {
+  return {
+    provider: row.provider,
+    enabled: Boolean(row.enabled),
+    clientId: row.client_id || '',
+    hasClientSecret: Boolean(row.client_secret_enc),
+    redirectUri: row.redirect_uri || '',
+    allowSignup: Boolean(row.allow_signup),
+    autoLinkVerifiedEmail: Boolean(row.auto_link_verified_email),
+  };
+}
+
+// Public: which sign-in buttons should the login page show?
+// Only the fact that a provider is on -- never any credential.
+app.get('/api/oauth/providers', async (req, res) => {
+  try {
+    const rows = await hkvmV3Context.db.all(
+      `SELECT provider FROM oauth_provider_settings
+       WHERE enabled = 1 AND client_id IS NOT NULL AND client_secret_enc IS NOT NULL`
+    );
+    res.json({ providers: rows.map((r) => r.provider) });
+  } catch (err) {
+    res.json({ providers: [] });
+  }
+});
+
+app.get('/api/admin/oauth-providers', checkAuth, checkAdmin, async (req, res) => {
+  try {
+    const rows = await hkvmV3Context.db.all(`SELECT * FROM oauth_provider_settings`);
+    const byProvider = new Map(rows.map((r) => [r.provider, r]));
+    const providers = OAUTH_PROVIDER_IDS.map((id) => {
+      const row = byProvider.get(id);
+      const base = process.env.TGVPANEL_PUBLIC_URL
+        ? process.env.TGVPANEL_PUBLIC_URL.replace(/\/+$/, '')
+        : `${req.protocol}://${req.get('host')}`;
+      const suggestedRedirect =
+        id === 'google'
+          ? `${base}/auth/google/callback`
+          : `${base}/auth/${id}/callback`;
+      return row
+        ? { ...publicProviderSettings(row), suggestedRedirectUri: suggestedRedirect }
+        : {
+            provider: id,
+            enabled: false,
+            clientId: '',
+            hasClientSecret: false,
+            redirectUri: '',
+            allowSignup: false,
+            autoLinkVerifiedEmail: true,
+            suggestedRedirectUri: suggestedRedirect,
+          };
+    });
+    res.json({ providers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/oauth-providers/:provider', checkAuth, checkAdmin, async (req, res) => {
+  try {
+    const provider = String(req.params.provider || '').toLowerCase();
+    if (!OAUTH_PROVIDER_IDS.includes(provider)) {
+      return res.status(400).json({ error: 'Unknown provider.' });
+    }
+    const body = req.body || {};
+    const enabled = body.enabled ? 1 : 0;
+    const allowSignup = body.allowSignup ? 1 : 0;
+    const autoLink = body.autoLinkVerifiedEmail === undefined ? 1 : body.autoLinkVerifiedEmail ? 1 : 0;
+    const clientId = String(body.clientId || '').trim();
+    const redirectUri = String(body.redirectUri || '').trim();
+    const clientSecretPlain = String(body.clientSecret || '').trim();
+
+    // Enabling without credentials would strand users at a dead login button.
+    const existing = await hkvmV3Context.db.get(
+      `SELECT * FROM oauth_provider_settings WHERE provider = ?`, [provider]
+    );
+    const effectiveSecret = clientSecretPlain || existing?.client_secret_enc || '';
+    if (enabled && (!clientId || !effectiveSecret)) {
+      return res.status(400).json({
+        error: 'Client ID and Client Secret are both required before enabling this provider.'
+      });
+    }
+    if (redirectUri && !/^https?:\/\//i.test(redirectUri)) {
+      return res.status(400).json({ error: 'Redirect URI must start with http:// or https://' });
+    }
+
+    const secretToStore = clientSecretPlain
+      ? encryptSecret(clientSecretPlain)
+      : existing?.client_secret_enc || null;
+
+    await hkvmV3Context.db.run(
+      `INSERT INTO oauth_provider_settings
+         (provider, enabled, client_id, client_secret_enc, redirect_uri, allow_signup, auto_link_verified_email, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(provider) DO UPDATE SET
+         enabled = excluded.enabled,
+         client_id = excluded.client_id,
+         client_secret_enc = excluded.client_secret_enc,
+         redirect_uri = excluded.redirect_uri,
+         allow_signup = excluded.allow_signup,
+         auto_link_verified_email = excluded.auto_link_verified_email,
+         updated_at = CURRENT_TIMESTAMP`,
+      [provider, enabled, clientId, secretToStore, redirectUri, allowSignup, autoLink]
+    );
+
+    await hkvmV3Context.db.logActivity({
+      userId: req.session.userId,
+      action: `oauth_provider_${enabled ? 'enabled' : 'updated'}.${provider}`,
+      resourceType: 'settings',
+      resourceId: provider,
+      ipAddress: req.ip
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[OAuth Settings] save failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Live check: does the configured provider actually answer? Saves an admin
+// from debugging a typo'd client id through the login page.
+app.post('/api/admin/oauth-providers/:provider/test', checkAuth, checkAdmin, async (req, res) => {
+  try {
+    const provider = String(req.params.provider || '').toLowerCase();
+    if (!OAUTH_PROVIDER_IDS.includes(provider)) {
+      return res.status(400).json({ error: 'Unknown provider.' });
+    }
+    const row = await hkvmV3Context.db.get(
+      `SELECT * FROM oauth_provider_settings WHERE provider = ?`, [provider]
+    );
+    if (!row || !row.client_id || !row.client_secret_enc) {
+      return res.status(400).json({ error: 'Save a Client ID and Secret first.' });
+    }
+
+    const { buildAuthorizeUrl, createOAuthState, createPkcePair } = require('./lib/security/oauth-providers');
+    const pkce = createPkcePair();
+    const url = buildAuthorizeUrl({
+      provider,
+      config: {
+        clientId: row.client_id,
+        clientSecret: '',
+        redirectUri: row.redirect_uri || `${req.protocol}://${req.get('host')}/auth/${provider}/callback`,
+      },
+      state: createOAuthState(),
+      codeChallenge: pkce.challenge,
+    });
+
+    // If the client id is malformed the provider still returns 200 for the
+    // consent page, so the useful signal is that the host resolves and answers.
+    const probe = await fetch(url, { method: 'GET', redirect: 'manual' });
+    res.json({
+      success: true,
+      reachable: probe.status > 0,
+      status: probe.status,
+      message:
+        probe.status < 400
+          ? 'Provider is reachable and the client ID was accepted.'
+          : `Provider answered ${probe.status}. Check the Client ID and that the app is not disabled.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Provider unreachable: ${err.message}` });
+  }
+});
+
+// --- 2FA admin policy ---
+app.get('/api/admin/2fa-policy', checkAuth, checkAdmin, async (req, res) => {
+  try {
+    const row = await hkvmV3Context.db.get(
+      `SELECT setting_value FROM settings WHERE setting_key = 'require_2fa_for_admins'`
+    );
+    const enrolled = await hkvmV3Context.db.get(
+      `SELECT COUNT(*) AS n FROM users WHERE two_factor_enabled = 1 AND is_active = 1`
+    );
+    const total = await hkvmV3Context.db.get(
+      `SELECT COUNT(*) AS n FROM users WHERE is_active = 1`
+    );
+    res.json({
+      requireForAdmins: String(row?.setting_value || '0') === '1',
+      enrolledUsers: Number(enrolled?.n || 0),
+      totalUsers: Number(total?.n || 0)
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/2fa-policy', checkAuth, checkAdmin, async (req, res) => {
+  try {
+    const on = req.body?.requireForAdmins ? '1' : '0';
+    await hkvmV3Context.db.run(
+      `INSERT INTO settings (setting_key, setting_value)
+       VALUES ('require_2fa_for_admins', ?)
+       ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value`,
+      [on]
+    );
+    await hkvmV3Context.db.logActivity({
+      userId: req.session.userId,
+      action: `2fa_policy_${on === '1' ? 'enforced' : 'relaxed'}`,
+      resourceType: 'settings',
+      resourceId: 'require_2fa_for_admins',
+      ipAddress: req.ip
+    });
+    res.json({ success: true, requireForAdmins: on === '1' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: clear a locked-out user's 2FA from the users page.
+app.post('/api/admin/users/:id/reset-2fa', checkAuth, checkAdmin, async (req, res) => {
+  try {
+    const targetId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(targetId)) return res.status(400).json({ error: 'Invalid user id.' });
+    if (targetId === req.session.userId) {
+      return res.status(400).json({ error: 'Manage your own 2FA from your profile settings.' });
+    }
+    const target = await hkvmV3Context.db.get(`SELECT id, username FROM users WHERE id = ?`, [targetId]);
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+
+    await hkvmV3Context.db.run(
+      `UPDATE users SET two_factor_enabled = 0, two_factor_secret_enc = NULL,
+         two_factor_last_step = NULL WHERE id = ?`,
+      [targetId]
+    );
+    await hkvmV3Context.db.run(`DELETE FROM two_factor_recovery_codes WHERE user_id = ?`, [targetId]);
+    await hkvmV3Context.db.logActivity({
+      userId: req.session.userId,
+      action: '2fa_reset_by_admin',
+      resourceType: 'user',
+      resourceId: String(targetId),
+      ipAddress: req.ip
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/admin/discord-settings', checkAuth, checkAdmin, (req, res) => {
   db.get(`SELECT * FROM discord_settings LIMIT 1`, (err, settings) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -6145,6 +6639,17 @@ async function bootstrapHkvmV3() {
   }
 
   v3WebRouter = createUnifiedWebRouter(hkvmV3Context);
+  oauthRouter = createOAuthRouter({
+    ctx: hkvmV3Context,
+    resolveRedirectUri: (provider, req) => {
+      // Prefer an explicitly configured public URL so the redirect
+      // matches the value registered with the provider exactly.
+      const base = process.env.TGVPANEL_PUBLIC_URL
+        ? process.env.TGVPANEL_PUBLIC_URL.replace(/\/+$/, '')
+        : `${req.protocol}://${req.get('host')}`;
+      return `${base}/auth/${provider}/callback`;
+    },
+  });
   attachUnifiedWebSockets(server, sessionParser, hkvmV3Context);
   return hkvmV3Context;
 }

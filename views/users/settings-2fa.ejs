@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title || 'Two-Factor Authentication' %></title>
+  <link rel="icon" href="<%= typeof siteLogo !== 'undefined' ? siteLogo : '/images/logo.png' %>" type="image/png">
+  <link rel="stylesheet" href="/css/admin.css">
+  <meta name="csrf-token" content="<%= csrfToken %>">
+</head>
+<body style="background:var(--bg-primary,#09090f);min-height:100vh;padding:32px 16px;">
+  <div style="max-width:640px;margin:0 auto;">
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <h1 style="margin:0;font-size:22px;color:var(--text-primary,#fff);">
+        <i class="fas fa-shield-halved" style="color:#6366F1;"></i> Two-Factor Authentication
+      </h1>
+      <a href="/profile" style="font-size:13px;color:var(--text-muted,#9ca3af);">Back to profile</a>
+    </div>
+
+    <% if (typeof required !== 'undefined' && required) { %>
+      <div style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);border-radius:12px;padding:14px 16px;margin-bottom:18px;">
+        <div style="color:#f59e0b;font-weight:600;font-size:14px;margin-bottom:4px;">Required by your administrator</div>
+        <div style="color:var(--text-secondary,#cbd5e1);font-size:13px;line-height:1.5;">
+          This panel requires two-factor authentication for your role. Finish setup below to continue.
+        </div>
+      </div>
+    <% } %>
+
+    <!-- Current state -->
+    <div class="card" style="margin-bottom:18px;">
+      <div class="card-body" style="display:flex;align-items:center;gap:14px;">
+        <div id="stateIcon" style="font-size:26px;">⏳</div>
+        <div style="flex:1;">
+          <div id="stateTitle" style="color:var(--text-primary,#fff);font-weight:600;">Checking status…</div>
+          <div id="stateDetail" style="color:var(--text-muted,#9ca3af);font-size:13px;margin-top:2px;">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recovery code warning -->
+    <div id="recoveryWarning" style="display:none;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);border-radius:12px;padding:14px 16px;margin-bottom:18px;">
+      <div style="color:#ef4444;font-weight:600;font-size:14px;margin-bottom:4px;">You are out of recovery codes</div>
+      <div style="color:var(--text-secondary,#cbd5e1);font-size:13px;line-height:1.5;">
+        If you lose your authenticator now, you will be locked out. Generate a new set below.
+      </div>
+    </div>
+
+    <!-- Setup flow -->
+    <div id="setupPane" class="card" style="display:none;margin-bottom:18px;">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-qrcode" style="color:#6366F1;"></i> Set up your authenticator</div>
+      </div>
+      <div class="card-body">
+        <ol style="color:var(--text-secondary,#cbd5e1);font-size:13px;line-height:1.8;padding-left:18px;margin:0 0 16px;">
+          <li>Open your authenticator app (Google Authenticator, Aegis, 1Password, Bitwarden…).</li>
+          <li>Scan the QR code below, or type the key in by hand.</li>
+          <li>Enter the 6-digit code it shows to finish.</li>
+        </ol>
+
+        <div style="text-align:center;margin-bottom:16px;">
+          <div id="qrContainer" style="display:inline-block;background:#fff;padding:12px;border-radius:12px;">
+            <img id="qrImage" alt="2FA QR code" style="display:block;width:200px;height:200px;">
+          </div>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:12px;color:var(--text-muted,#9ca3af);margin-bottom:6px;">
+            Can't scan? Enter this key manually
+          </label>
+          <div style="display:flex;gap:8px;">
+            <input id="manualKey" readonly
+                   style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border-color,#2d2d3d);background:rgba(0,0,0,0.3);color:#fff;font-family:monospace;font-size:13px;letter-spacing:1px;">
+            <button type="button" class="btn btn-secondary" onclick="copyKey()" style="padding:10px 14px;">Copy</button>
+          </div>
+        </div>
+
+        <label style="display:block;font-size:12px;color:var(--text-muted,#9ca3af);margin-bottom:6px;">
+          Enter the 6-digit code from your app
+        </label>
+        <input id="confirmCode" maxlength="6" inputmode="numeric" placeholder="000000"
+               style="width:100%;padding:12px;font-size:20px;letter-spacing:6px;text-align:center;border-radius:10px;border:1px solid var(--border-color,#2d2d3d);background:rgba(0,0,0,0.3);color:#fff;margin-bottom:12px;box-sizing:border-box;">
+
+        <div id="setupError" style="color:#ef4444;font-size:13px;margin-bottom:10px;display:none;"></div>
+
+        <button type="button" id="enableBtn" class="btn btn-primary" onclick="enable2fa()"
+                style="width:100%;justify-content:center;padding:11px;">
+          Enable Two-Factor Authentication
+        </button>
+      </div>
+    </div>
+
+    <!-- Recovery codes reveal -->
+    <div id="codesPane" class="card" style="display:none;margin-bottom:18px;">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-key" style="color:#f59e0b;"></i> Save your recovery codes</div>
+      </div>
+      <div class="card-body">
+        <p style="color:var(--text-secondary,#cbd5e1);font-size:13px;line-height:1.6;margin:0 0 14px;">
+          Each code signs you in <strong>once</strong> if you lose your phone. They are shown only now.
+          Store them somewhere safe and offline — a password manager or printed paper.
+        </p>
+        <div id="codeGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-family:monospace;font-size:15px;"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-secondary" onclick="copyCodes()" style="flex:1;justify-content:center;padding:10px;">Copy all</button>
+          <button type="button" class="btn btn-secondary" onclick="downloadCodes()" style="flex:1;justify-content:center;padding:10px;">Download .txt</button>
+          <button type="button" class="btn btn-primary" onclick="finishSetup()" style="flex:1;justify-content:center;padding:10px;">I've saved them</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manage existing 2FA -->
+    <div id="managePane" class="card" style="display:none;">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-sliders" style="color:#6366F1;"></i> Manage</div>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:10px;">
+        <button type="button" class="btn btn-secondary" onclick="regenerateCodes()" style="justify-content:center;padding:11px;">
+          Generate new recovery codes
+        </button>
+        <button type="button" class="btn" onclick="disable2fa()"
+                style="justify-content:center;padding:11px;background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.4);">
+          Turn off two-factor authentication
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+    let pendingCodes = [];
+
+    function api(path, body) {
+      return fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+        body: JSON.stringify(body || {})
+      }).then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || 'Request failed');
+        return data;
+      });
+    }
+
+    async function loadState() {
+      try {
+        const r = await fetch('/api/auth/2fa/status', { headers: { 'X-CSRF-Token': CSRF } });
+        const s = await r.json();
+        render(s);
+      } catch (e) {
+        document.getElementById('stateTitle').textContent = 'Could not load 2FA status';
+      }
+    }
+
+    function render(state) {
+      const disabled = state.enabled === false || state.enabled === 0;
+
+      document.getElementById('stateIcon').textContent = disabled ? '⚠️' : '✅';
+      document.getElementById('stateTitle').textContent = disabled
+        ? 'Two-factor authentication is OFF'
+        : 'Two-factor authentication is ON';
+      document.getElementById('stateDetail').textContent = disabled
+        ? 'Your account is protected by a password only.'
+        : (state.recoveryCodesRemaining + ' recovery code' +
+           (state.recoveryCodesRemaining === 1 ? '' : 's') + ' remaining.');
+
+      document.getElementById('setupPane').style.display = disabled ? 'block' : 'none';
+      document.getElementById('managePane').style.display = disabled ? 'none' : 'block';
+      document.getElementById('recoveryWarning').style.display =
+        (!disabled && state.recoveryCodesRemaining === 0) ? 'block' : 'none';
+
+      if (disabled) startSetup();
+    }
+
+    async function startSetup() {
+      try {
+        const data = await api('/api/auth/2fa/setup');
+        document.getElementById('qrImage').src = data.qrDataUrl;
+        document.getElementById('manualKey').value = data.secret;
+      } catch (e) {
+        showErr('setupError', e.message);
+      }
+    }
+
+    function showErr(id, msg) {
+      const el = document.getElementById(id);
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    async function enable2fa() {
+      const code = document.getElementById('confirmCode').value.trim();
+      const btn = document.getElementById('enableBtn');
+      document.getElementById('setupError').style.display = 'none';
+      if (!/^\d{6}$/.test(code)) return showErr('setupError', 'Enter the 6-digit code from your app.');
+
+      btn.disabled = true;
+      btn.textContent = 'Verifying…';
+      try {
+        const data = await api('/api/auth/2fa/enable', { code });
+        pendingCodes = data.recoveryCodes || [];
+        showCodes(pendingCodes);
+      } catch (e) {
+        showErr('setupError', e.message);
+        document.getElementById('confirmCode').value = '';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Enable Two-Factor Authentication';
+      }
+    }
+
+    function showCodes(codes) {
+      const grid = document.getElementById('codeGrid');
+      grid.innerHTML = '';
+      codes.forEach((c) => {
+        const d = document.createElement('div');
+        d.textContent = c;
+        d.style.cssText = 'padding:8px 10px;background:rgba(0,0,0,0.35);border:1px solid var(--border-color,#2d2d3d);border-radius:6px;color:#fff;text-align:center;letter-spacing:1px;';
+        grid.appendChild(d);
+      });
+      document.getElementById('setupPane').style.display = 'none';
+      document.getElementById('codesPane').style.display = 'block';
+    }
+
+    async function regenerateCodes() {
+      if (!confirm('This replaces your existing recovery codes. The old ones stop working. Continue?')) return;
+      try {
+        const data = await api('/api/auth/2fa/recovery-codes/regenerate');
+        pendingCodes = data.recoveryCodes || [];
+        showCodes(pendingCodes);
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function disable2fa() {
+      const code = prompt('Enter your current 6-digit code (or a recovery code) to turn 2FA off:');
+      if (!code) return;
+      try {
+        await api('/api/auth/2fa/disable', { code });
+        alert('Two-factor authentication is now off.');
+        loadState();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    function copyKey() {
+      navigator.clipboard.writeText(document.getElementById('manualKey').value);
+    }
+
+    function copyCodes() {
+      navigator.clipboard.writeText(pendingCodes.join('\n'));
+    }
+
+    function downloadCodes() {
+      const blob = new Blob(
+        ['TGVPANEL recovery codes\n' +
+         'Each code works once. Keep this file offline.\n\n' +
+         pendingCodes.join('\n') + '\n'],
+        { type: 'text/plain' }
+      );
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'tgvpanel-recovery-codes.txt';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function finishSetup() {
+      pendingCodes = [];
+      document.getElementById('codesPane').style.display = 'none';
+      loadState();
+      if (new URLSearchParams(location.search).get('required') === '1') {
+        // Enrollment satisfied the policy; continue to the dashboard.
+        location.href = '/dashboard';
+      }
+    }
+
+    loadState();
+  </script>
+</body>
+</html>

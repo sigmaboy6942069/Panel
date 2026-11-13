@@ -8,35 +8,108 @@
   <link rel="stylesheet" href="/css/admin.css">
 </head>
 <body style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg-primary,#09090f);">
-  <div style="width:100%;max-width:400px;background:var(--bg-card,#12121d);border:1px solid var(--border-card,rgba(255,255,255,0.08));border-radius:16px;padding:28px;">
+  <div style="width:100%;max-width:420px;background:var(--bg-card,#12121d);border:1px solid var(--border-card,rgba(255,255,255,0.08));border-radius:16px;padding:28px;">
     <h2 style="margin:0 0 8px;color:var(--text-primary,#fff);">Two-Factor Verification</h2>
-    <p style="margin:0 0 18px;font-size:13px;color:var(--text-muted,#9ca3af);">
-      Enter the 6-digit TOTP code from your authenticator app for <strong><%= username %></strong>.
+    <p id="instructions" style="margin:0 0 18px;font-size:13px;color:var(--text-muted,#9ca3af);">
+      Enter the 6-digit code from your authenticator app for <strong><%= username %></strong>.
     </p>
+
     <form onsubmit="verify2fa(event)">
-      <input id="totpCode" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000"
-             style="width:100%;padding:12px;font-size:20px;letter-spacing:6px;text-align:center;border-radius:10px;border:1px solid var(--border-color,#2d2d3d);background:rgba(0,0,0,0.3);color:#fff;margin-bottom:14px;">
+      <input id="totpCode" maxlength="10" autocomplete="one-time-code" required autofocus placeholder="000000"
+             style="width:100%;padding:12px;font-size:20px;letter-spacing:6px;text-align:center;border-radius:10px;border:1px solid var(--border-color,#2d2d3d);background:rgba(0,0,0,0.3);color:#fff;margin-bottom:10px;box-sizing:border-box;">
+
       <div id="errMsg" style="color:#ef4444;font-size:13px;margin-bottom:10px;display:none;"></div>
-      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;">Verify &amp; Sign In</button>
+
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;">
+        Verify &amp; Sign In
+      </button>
     </form>
+
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.07);text-align:center;">
+      <button type="button" id="toggleRecovery" onclick="toggleRecoveryMode()"
+              style="background:none;border:none;color:#818cf8;font-size:12px;cursor:pointer;text-decoration:underline;">
+        Lost your device? Use a recovery code
+      </button>
+      <p id="recoveryHint" style="display:none;margin:10px 0 0;font-size:12px;color:var(--text-muted,#9ca3af);line-height:1.5;">
+        Enter one of the recovery codes you saved when you enabled 2FA.
+        Codes look like <code>abcd-efgh</code> and each one works only once.
+      </p>
+    </div>
+
+    <p style="margin:16px 0 0;text-align:center;">
+      <a href="/login" style="font-size:12px;color:var(--text-muted,#9ca3af);">Cancel and sign in as someone else</a>
+    </p>
   </div>
+
   <script>
+    let recoveryMode = false;
+
+    function toggleRecoveryMode() {
+      recoveryMode = !recoveryMode;
+      const input = document.getElementById('totpCode');
+      const label = document.getElementById('toggleRecovery');
+      const hint = document.getElementById('recoveryHint');
+      const instr = document.getElementById('instructions');
+
+      if (recoveryMode) {
+        input.value = '';
+        input.maxLength = 20;
+        input.pattern = '';
+        input.placeholder = 'abcd-efgh';
+        input.style.letterSpacing = '2px';
+        input.style.fontSize = '18px';
+        label.textContent = 'Use authenticator code instead';
+        hint.style.display = 'block';
+        instr.innerHTML = 'Enter a recovery code for <strong><%= username %></strong>.';
+      } else {
+        input.value = '';
+        input.maxLength = 10;
+        input.placeholder = '000000';
+        input.style.letterSpacing = '6px';
+        input.style.fontSize = '20px';
+        label.textContent = 'Lost your device? Use a recovery code';
+        hint.style.display = 'none';
+        instr.innerHTML = 'Enter the 6-digit code from your authenticator app for <strong><%= username %></strong>.';
+      }
+      input.focus();
+    }
+
     async function verify2fa(e) {
       e.preventDefault();
       const errEl = document.getElementById('errMsg');
+      const btn = e.target.querySelector('button[type="submit"]');
       errEl.style.display = 'none';
-      const res = await fetch('/api/login/2fa', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: document.getElementById('totpCode').value })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        errEl.textContent = data.error || 'Verification failed';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/login/2fa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: document.getElementById('totpCode').value })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          errEl.textContent = data.error || 'Verification failed';
+          errEl.style.display = 'block';
+          document.getElementById('totpCode').value = '';
+          document.getElementById('totpCode').focus();
+          return;
+        }
+
+        if (typeof data.recoveryCodesRemaining === 'number' && data.recoveryCodesRemaining <= 2) {
+          // Warn on the way through rather than ambushing them later.
+          try {
+            sessionStorage.setItem('recoveryWarn', String(data.recoveryCodesRemaining));
+          } catch (e) {}
+        }
+        window.location.href = data.redirectUrl || '/dashboard';
+      } catch (err) {
+        errEl.textContent = 'Could not reach the server. Check your connection.';
         errEl.style.display = 'block';
-        return;
+      } finally {
+        btn.disabled = false;
       }
-      window.location.href = data.redirectUrl || '/dashboard';
     }
   </script>
 </body>

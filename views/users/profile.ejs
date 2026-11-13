@@ -105,6 +105,41 @@
             </div>
           </div>
 
+          <!-- Two-Factor Authentication -->
+          <div class="card" style="margin-bottom: 20px;">
+            <div class="card-header">
+              <div class="card-title"><i class="fas fa-shield-halved" style="color: #6366F1;"></i> Two-Factor Authentication</div>
+            </div>
+            <div class="card-body">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div id="twoFaIcon" style="font-size: 22px;">⏳</div>
+                <div style="flex: 1;">
+                  <div id="twoFaTitle" style="font-size: 13px; font-weight: 600;">Checking…</div>
+                  <div id="twoFaDetail" style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">—</div>
+                </div>
+                <a href="/settings/2fa" id="twoFaAction" class="btn btn-outline btn-sm" style="white-space: nowrap;">
+                  Manage
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Connected sign-in accounts -->
+          <div class="card" style="margin-bottom: 20px;">
+            <div class="card-header">
+              <div class="card-title"><i class="fas fa-link" style="color: #10B981;"></i> Connected Sign-in Accounts</div>
+            </div>
+            <div class="card-body">
+              <div id="linkedProviders" style="display: grid; gap: 10px;">
+                <div style="font-size: 12px; color: var(--text-secondary);">Loading…</div>
+              </div>
+              <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 12px; line-height: 1.5;">
+                Linking a provider lets you sign in with it. Your password still works unless you
+                turn it off, and two-factor authentication still applies.
+              </div>
+            </div>
+          </div>
+
           <!-- Account Status -->
           <div class="card">
             <div class="card-header">
@@ -304,8 +339,93 @@ function isValidEmail(email) {
   return re.test(email);
 }
 
+// --- Two-factor status ---
+async function loadTwoFactorCard() {
+  try {
+    const res = await fetch('/api/v1/auth/2fa/status', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('unavailable');
+    const s = await res.json();
+
+    document.getElementById('twoFaIcon').textContent = s.enabled ? '✅' : '⚠️';
+    document.getElementById('twoFaTitle').textContent = s.enabled
+      ? 'Enabled'
+      : 'Not enabled';
+    document.getElementById('twoFaDetail').textContent = s.enabled
+      ? (s.recoveryCodesRemaining + ' recovery code' +
+         (s.recoveryCodesRemaining === 1 ? '' : 's') + ' remaining' +
+         (s.hint ? ' — ' + s.hint : ''))
+      : 'Add a second step to your sign-in.';
+    document.getElementById('twoFaAction').textContent = s.enabled ? 'Manage' : 'Set up';
+  } catch (e) {
+    document.getElementById('twoFaIcon').textContent = '⚠️';
+    document.getElementById('twoFaTitle').textContent = 'Could not load status';
+    document.getElementById('twoFaDetail').textContent = 'Open the settings page to check.';
+  }
+}
+
+// --- Connected sign-in accounts ---
+const PROVIDER_LABELS = { google: 'Google', discord: 'Discord', github: 'GitHub' };
+
+async function loadLinkedAccounts() {
+  const host = document.getElementById('linkedProviders');
+  try {
+    const res = await fetch('/api/my/linked-accounts', { credentials: 'same-origin' });
+    const data = await res.json();
+    const linked = new Map((data.linked || []).map((r) => [r.provider, r]));
+    const avail = data.available || [];
+
+    host.innerHTML = '';
+
+    if (avail.length === 0 && linked.size === 0) {
+      host.innerHTML = '<div style="font-size:12px;color:var(--text-secondary);">' +
+        'No social sign-in methods are enabled on this panel.</div>';
+      return;
+    }
+
+    // Show every enabled provider, plus anything already linked.
+    const all = Array.from(new Set([...avail, ...linked.keys()]));
+    all.forEach((provider) => {
+      const row = linked.get(provider);
+      const el = document.createElement('div');
+      el.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-subtle);';
+      el.innerHTML =
+        '<div style="flex:1;">' +
+          '<div style="font-size:13px;font-weight:600;">' + (PROVIDER_LABELS[provider] || provider) + '</div>' +
+          '<div style="font-size:11.5px;color:var(--text-secondary);">' +
+            (row ? 'Connected' + (row.email ? ' as ' + row.email : '') : 'Not connected') +
+          '</div>' +
+        '</div>' +
+        (row
+          ? '<button class="btn btn-outline btn-sm" data-unlink="' + provider + '">Disconnect</button>'
+          : '<a class="btn btn-outline btn-sm" href="/auth/' + provider + '">Connect</a>') +
+        '';
+      host.appendChild(el);
+    });
+
+    host.querySelectorAll('[data-unlink]').forEach((btn) => {
+      btn.onclick = async () => {
+        const provider = btn.getAttribute('data-unlink');
+        if (!confirm('Disconnect ' + (PROVIDER_LABELS[provider] || provider) + '?')) return;
+        const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+        const token = csrfMeta ? csrfMeta.content : '';
+        const r = await fetch('/api/my/unlink-account/' + provider, {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': token }
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) return alert(d.error || 'Could not disconnect.');
+        loadLinkedAccounts();
+      };
+    });
+  } catch (e) {
+    host.innerHTML = '<div style="font-size:12px;color:var(--text-secondary);">Could not load.</div>';
+  }
+}
+
 // Load profile on page load
 loadProfile();
+loadTwoFactorCard();
+loadLinkedAccounts();
 </script>
 </body>
 </html>

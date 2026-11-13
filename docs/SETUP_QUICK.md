@@ -324,6 +324,20 @@ Keep `.tgvpanel-secret` — it decrypts stored credentials and session secrets. 
 you lose it, node keys and stored passwords become unreadable. Back it up, never
 commit it.
 
+### Optional: 2FA and social login
+
+Both are off by default. If you want them:
+
+- **2FA** — sign in, open **Profile → Two-Factor Authentication → Set up**,
+  scan the code, save the 10 recovery codes. Do this for your admin account
+  at minimum.
+- **Google / Discord / GitHub login** — **Admin → Settings → Sign-in**.
+  Each provider needs a client ID and secret from its own developer console,
+  plus the redirect URI the panel shows you.
+
+Full walkthrough, including how accounts get linked and what to do when someone
+is locked out: **[AUTH_AND_SIGNIN.md](AUTH_AND_SIGNIN.md)**.
+
 ---
 
 ## 8. Updating

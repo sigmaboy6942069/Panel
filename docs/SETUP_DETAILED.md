@@ -425,6 +425,8 @@ without a live call on every page load.
 | Node transport | HMAC-SHA256, ±300s replay window |
 | Node identity | per-node API key + HMAC secret |
 | Tunnel | SSH key, outbound only |
+| Second factor | TOTP, replay-protected, single-use recovery codes |
+| Social sign-in | OAuth 2.0 + PKCE, constant-time state, hashed secrets |
 
 ### The `.tgvpanel-secret` file
 
@@ -441,6 +443,36 @@ One exception: if it's missing, the panel regenerates a new one, but existing
 encrypted values can no longer be decrypted. Node credentials get re-issued
 automatically; customer passwords and upstream keys do not.
 
+### Sign-in and 2FA
+
+Two independent controls, both off until you turn them on. Full detail in
+**[AUTH_AND_SIGNIN.md](AUTH_AND_SIGNIN.md)**; the design decisions worth knowing:
+
+**TOTP replay protection.** A code stays valid for its 30-second window plus one
+window either side for clock skew. Without extra bookkeeping that means the same
+code works for up to 90 seconds, repeatedly. Each account records the last
+accepted step, so a code is refused the moment it has been used once.
+
+**Recovery codes.** Ten are generated when 2FA is enabled, hashed with SHA-256,
+and marked used on first use with an atomic conditional update so two concurrent
+requests cannot both consume one. Regenerating destroys the old set rather than
+leaving it dormant.
+
+**OAuth account linking.** An identity is matched on the provider's stable
+subject id, never on email. When only the email matches, linking happens
+automatically *only* if the provider vouches the address is verified. An
+unverified email could belong to anyone, so that path demands the existing
+account's password first. This is the difference between a convenience feature
+and an account-takeover hole.
+
+**2FA applies to social sign-in.** OAuth proves identity, not possession of the
+second factor. Every provider's callback runs the same `pending2faUser`
+handshake as password login, then regenerates the session id. Skipping this is a
+common real-world bypass.
+
+**Provider secrets** are encrypted with the vault key and never returned by the
+API — the settings page only learns whether one exists.
+
 ### Known limits
 
 - The panel trusts `X-Forwarded-For` when `trust proxy` is on. Keep nginx as the
@@ -449,6 +481,10 @@ automatically; customer passwords and upstream keys do not.
   that would need a nonce refactor across every view.
 - Node compromise exposes that node's instances. It does not expose billing,
   customers, or other nodes' credentials.
+- 2FA is per-account, not per-device. One valid code authorises every session for
+  that account. Per-device binding would need WebAuthn.
+- No email verification is sent by the panel; it relies on the provider's verdict.
+- No SMS 2FA. SIM-swap attacks make it weaker than TOTP.
 
 ---
 

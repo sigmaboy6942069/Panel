@@ -6,6 +6,13 @@ import { Router, Request, Response } from 'express';
 import { HkvmRuntimeContext } from '../context';
 import { getNodeHealthReport } from '../node-agent/health';
 import { decryptSecret, verifyTotpCode } from '../security/crypto-vault';
+import {
+  verifyTotpForLogin,
+  countUnusedRecoveryCodes,
+  regenerateRecoveryCodes,
+  describeTwoFactorState,
+  resetTwoFactorForUser,
+} from '../security/two-factor';
 import { requirePrincipal, requireRole } from '../security/middleware';
 
 export function createUnifiedWebRouter(
@@ -66,17 +73,34 @@ export function createUnifiedWebRouter(
       if (!pending?.id) {
         return res.status(400).json({ error: 'No pending 2FA login session. Please log in again.' });
       }
-      const row = await ctx.db.get<any>(
-        `SELECT * FROM users WHERE id = ?`,
-        [pending.id]
-      );
+      const row = await ctx.db.get<any>(`SELECT * FROM users WHERE id = ?`, [pending.id]);
       if (!row?.two_factor_secret_enc) {
         return res.status(400).json({ error: '2FA configuration missing on account.' });
       }
-      const secret = decryptSecret(row.two_factor_secret_enc);
-      if (!verifyTotpCode(secret, String(req.body?.code || ''))) {
-        return res.status(401).json({ error: 'Invalid 6-digit verification code.' });
+      if (!row.is_active) {
+        delete sess.pending2faUser;
+        return res.status(403).json({ error: 'This account has been disabled.' });
       }
+
+      const secret = decryptSecret(row.two_factor_secret_enc);
+      const submitted = String(req.body?.code || '');
+
+      // Accepts a TOTP code or a one-time recovery code, and rejects a TOTP
+      // code that was already used inside its own validity window.
+      const verdict = await verifyTotpForLogin(ctx.db as any, row.id, secret, submitted);
+      if (!verdict.ok) {
+        await ctx.db.logActivity({
+          userId: row.id,
+          action: 'user_login_2fa_failed',
+          resourceType: 'user',
+          resourceId: String(row.id),
+          ipAddress: req.ip || null,
+        });
+        return res.status(401).json({ error: verdict.reason });
+      }
+
+      const wasRecoveryCode = submitted.replace(/[^a-z0-9]/gi, '').length > 6;
+      const remaining = await countUnusedRecoveryCodes(ctx.db as any, row.id);
 
       delete sess.pending2faUser;
       sess.user = pending;
@@ -84,16 +108,32 @@ export function createUnifiedWebRouter(
       sess.username = pending.username;
       sess.role = pending.role;
 
+      // Fresh session id once the second factor passes, so a pre-auth session
+      // id cannot be fixated into an authenticated one.
+      await new Promise<void>((resolve) => (req as any).session.regenerate(() => resolve()));
+      const fresh: any = (req as any).session;
+      fresh.user = pending;
+      fresh.userId = pending.id;
+      fresh.username = pending.username;
+      fresh.role = pending.role;
+
+      await ctx.db.run(`UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?`, [row.id]);
       await ctx.db.logActivity({
         userId: row.id,
-        action: 'user_login_2fa_verified',
+        action: wasRecoveryCode ? 'user_login_2fa_recovery_code' : 'user_login_2fa_verified',
         resourceType: 'user',
         resourceId: String(row.id),
         ipAddress: req.ip || null,
       });
 
       const redirectUrl = row.role === 'admin' ? '/admin/dashboard' : '/dashboard';
-      return res.json({ success: true, user: sess.user, redirectUrl });
+      return res.json({
+        success: true,
+        user: pending,
+        redirectUrl,
+        usedRecoveryCode: wasRecoveryCode,
+        recoveryCodesRemaining: remaining,
+      });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
