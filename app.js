@@ -476,12 +476,20 @@ const sessionParser = session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false,
+    // `auto` marks the cookie Secure whenever the request is HTTPS (directly or
+    // via a trusted proxy) and still works over plain HTTP on localhost.
+    secure: process.env.TGVPANEL_COOKIE_SECURE === 'false' ? false : 'auto',
     httpOnly: true,
     sameSite: 'lax',
     maxAge: 24 * 60 * 60 * 1000
   }
 });
+// Behind a TLS-terminating proxy, trust its forwarded headers so cookies can be
+// marked Secure and rate limiting sees real client IPs.
+if (process.env.TGVPANEL_TRUST_PROXY !== 'false') {
+  app.set('trust proxy', 1);
+}
+
 app.use(sessionParser);
 app.use(securityHeadersAndCsrfMiddleware);
 
@@ -785,7 +793,47 @@ function checkAdmin(req, res, next) {
 
 // ============= AUTH ROUTES =============
 
-app.post('/api/login', (req, res) => {
+// Brute-force guard for the login endpoint: 10 failures per IP per 15 min.
+// Successful logins clear the counter so a legit user is never locked out.
+const LOGIN_MAX_FAILURES = Number(process.env.TGVPANEL_LOGIN_MAX_FAILURES || 10);
+const LOGIN_WINDOW_MS = Number(process.env.TGVPANEL_LOGIN_WINDOW_MS || 15 * 60 * 1000);
+const loginFailures = new Map();
+const loginThrottleTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of loginFailures.entries()) {
+    if (entry.resetAt <= now) loginFailures.delete(ip);
+  }
+}, 60_000);
+if (typeof loginThrottleTimer.unref === 'function') loginThrottleTimer.unref();
+
+function loginThrottle(req, res, next) {
+  const ip =
+    String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+    req.socket.remoteAddress ||
+    'unknown';
+  const now = Date.now();
+  const entry = loginFailures.get(ip);
+  if (entry && entry.resetAt > now && entry.count >= LOGIN_MAX_FAILURES) {
+    const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+    res.setHeader('Retry-After', String(retryAfter));
+    return res.status(429).json({
+      error: `Too many failed login attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).`,
+      retry_after_seconds: retryAfter,
+    });
+  }
+  req.recordLoginFailure = () => {
+    const cur = loginFailures.get(ip);
+    if (!cur || cur.resetAt <= now) {
+      loginFailures.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+    } else {
+      cur.count += 1;
+    }
+  };
+  req.clearLoginFailures = () => loginFailures.delete(ip);
+  next();
+}
+
+app.post('/api/login', loginThrottle, (req, res) => {
   const { username, password } = req.body;
   console.log(`[Auth] Login attempt for username: ${username}`);
   
@@ -801,6 +849,7 @@ app.post('/api/login', (req, res) => {
 
     if (!user || !verdict.valid) {
       console.warn(`[Auth Error] Invalid credentials for username: ${username}`);
+      if (typeof req.recordLoginFailure === 'function') req.recordLoginFailure();
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -851,6 +900,7 @@ app.post('/api/login', (req, res) => {
         .catch(() => undefined);
     }
     console.log(`[Auth Success] User ${user.id} (${user.username}) logged in with role: ${user.role}`);
+    if (typeof req.clearLoginFailures === 'function') req.clearLoginFailures();
     res.json({ success: true, user: { id: user.id, username: user.username, role: user.role } });
   });
 });
@@ -6102,7 +6152,11 @@ async function bootstrapHkvmV3() {
 const hkvmReadyPromise = bootstrapHkvmV3()
   .then(() => {
     if (process.env.TGVPANEL_NO_LISTEN !== '1' && process.env.HKVM_NO_LISTEN !== '1') {
-      server.listen(Number(PORT), '0.0.0.0', async () => {
+      // Bind address. Default is loopback so the panel is only reachable
+      // through a TLS reverse proxy on the same host. Set TGVPANEL_BIND_HOST
+      // (or BIND_HOST) to 0.0.0.0 only if you really need to expose it.
+      const BIND_HOST = process.env.TGVPANEL_BIND_HOST || process.env.BIND_HOST || '127.0.0.1';
+      server.listen(Number(PORT), BIND_HOST, async () => {
         console.log('[License] Free Edition active');
 
         const validCpuModels = Object.keys(CPU_MODELS);
