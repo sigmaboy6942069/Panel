@@ -1403,7 +1403,7 @@
               <div style="font-size:11.5px;color:var(--text-muted);">Run on your remote Ubuntu/Debian/RHEL server to auto-install LXC/KVM deps, TLS certs &amp; 24/7 systemd service:</div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <code class="st-cmd-code" id="nodeQuickInstallCmd">curl -fsSL https://raw.githubusercontent.com/ShadowGamerIND37/TGVPANEL/main/menu.sh -o menu.sh &amp;&amp; sudo bash menu.sh</code>
+              <code class="st-cmd-code" id="nodeQuickInstallCmd"><% if (typeof panelRepoRawBase !== 'undefined' && panelRepoRawBase) { %>curl -fsSL <%= panelRepoRawBase %>/menu.sh -o menu.sh &amp;&amp; sudo bash menu.sh<% } else { %># clone <%= typeof panelRepoUrl !== 'undefined' ? panelRepoUrl : 'your panel repo' %> and run: sudo bash menu.sh<% } %></code>
               <button type="button" class="st-copy-mini" onclick="copyTextWithToast(document.getElementById('nodeQuickInstallCmd').textContent, 'Installer command copied!')">Copy One-Liner</button>
             </div>
           </div>

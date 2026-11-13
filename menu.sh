@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # TGVPANEL — Interactive Management Menu (Panel + Remote Node + Migration + Update)
-# Repository : https://github.com/ShadowGamerIND37/TGVPANEL
+# Repository : https://github.com/sigmaboy6942069/Panel
 #
 # Usage:
 #   Interactive Menu : sudo bash menu.sh
-#   One-Liner        : curl -fsSL https://raw.githubusercontent.com/ShadowGamerIND37/TGVPANEL/main/menu.sh -o menu.sh && sudo bash menu.sh
+#   One-Liner        : curl -fsSL https://raw.githubusercontent.com/sigmaboy6942069/Panel/main/menu.sh -o menu.sh && sudo bash menu.sh
 #   CLI Shortcuts    : sudo bash menu.sh [--status | --update | --migrate-db | --help]
 # ==============================================================================
 set -euo pipefail
 
-REPO_URL="${TGVPANEL_REPO_URL:-https://github.com/ShadowGamerIND37/TGVPANEL.git}"
+REPO_URL="${TGVPANEL_REPO_URL:-https://github.com/sigmaboy6942069/Panel.git}"
 REPO_BRANCH="${TGVPANEL_REPO_BRANCH:-main}"
 
 # Resolve install directory: if running inside an existing TGVPANEL repo, default to it; else /opt/tgvpanel

@@ -17,6 +17,30 @@ import { LocalNodeRuntime } from '../../node-agent/agent';
 import { getNodeHealthReport, NodeHealthReport } from '../../node-agent/health';
 import { HostResourceStats } from '../../node-agent/host-stats';
 
+/**
+ * Repository that node join/install one-liners download `menu.sh` from.
+ *
+ * Operators run a fork, so this must not be hardcoded to the upstream repo:
+ * a node cloned from the wrong repo ends up running a different panel version
+ * than the controller that paired it. Override with TGVPANEL_REPO_URL.
+ */
+export const DEFAULT_PANEL_REPO_URL = 'https://github.com/sigmaboy6942069/Panel.git';
+
+export function resolvePanelRepoUrl(): string {
+  const raw = (process.env.TGVPANEL_REPO_URL || '').trim();
+  return raw || DEFAULT_PANEL_REPO_URL;
+}
+
+/** Raw.githubusercontent.com base for the configured repo + branch. */
+export function resolvePanelRawBase(): string {
+  const repo = resolvePanelRepoUrl().replace(/\.git$/i, '').replace(/\/+$/, '');
+  const branch = (process.env.TGVPANEL_REPO_BRANCH || 'main').trim() || 'main';
+  const m = /github\.com[/:]([^/]+)\/([^/]+)$/i.exec(repo);
+  if (m) return `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${branch}`;
+  // Non-GitHub mirrors cannot be served from raw.githubusercontent.com.
+  return '';
+}
+
 export interface NodeRecord {
   id: number;
   name: string;
@@ -705,7 +729,10 @@ export class NodeManager {
     } catch {
       // Ignore malformed legacy URL
     }
-    const curlJoinCommand = `curl -fsSL https://raw.githubusercontent.com/ShadowGamerIND37/TGVPANEL/main/menu.sh -o menu.sh && chmod +x menu.sh && sudo ${advertisePrefix}bash menu.sh --join "${safeCtrl}" "${rawToken}"`;
+    const rawBase = resolvePanelRawBase();
+    const curlJoinCommand = rawBase
+      ? `curl -fsSL ${rawBase}/menu.sh -o menu.sh && chmod +x menu.sh && sudo ${advertisePrefix}bash menu.sh --join "${safeCtrl}" "${rawToken}"`
+      : `# menu.sh from ${resolvePanelRepoUrl()}\nsudo ${advertisePrefix}bash menu.sh --join "${safeCtrl}" "${rawToken}"`;
     const localJoinCommand = `sudo ${advertisePrefix}bash menu.sh --join "${safeCtrl}" "${rawToken}"`;
 
     return {

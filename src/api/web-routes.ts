@@ -1,3 +1,4 @@
+import { resolvePanelRawBase, resolvePanelRepoUrl } from '../services/nodes/NodeClient';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -17,6 +18,10 @@ export function createUnifiedWebRouter(
 
   router.use(async (_req: Request, res: Response, next) => {
     res.locals.panelVersion = process.env.PANEL_VERSION || 'V3.0';
+    // Repo the node join/install one-liners are served from, so a fork's UI
+    // never tells operators to install someone else's code.
+    res.locals.panelRepoUrl = resolvePanelRepoUrl();
+    res.locals.panelRepoRawBase = resolvePanelRawBase();
     res.locals.siteLogo = res.locals.siteLogo || '/images/logo.png';
     res.locals.siteName =
       res.locals.siteName && !/^hkvm(\s+panel)?(\s+v[\d.]+)?$/i.test(String(res.locals.siteName).trim())

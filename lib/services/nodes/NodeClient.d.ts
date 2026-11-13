@@ -3,6 +3,17 @@ import { UnifiedDatabase } from '../../db/database';
 import { LocalNodeRuntime } from '../../node-agent/agent';
 import { NodeHealthReport } from '../../node-agent/health';
 import { HostResourceStats } from '../../node-agent/host-stats';
+/**
+ * Repository that node join/install one-liners download `menu.sh` from.
+ *
+ * Operators run a fork, so this must not be hardcoded to the upstream repo:
+ * a node cloned from the wrong repo ends up running a different panel version
+ * than the controller that paired it. Override with TGVPANEL_REPO_URL.
+ */
+export declare const DEFAULT_PANEL_REPO_URL = "https://github.com/sigmaboy6942069/Panel.git";
+export declare function resolvePanelRepoUrl(): string;
+/** Raw.githubusercontent.com base for the configured repo + branch. */
+export declare function resolvePanelRawBase(): string;
 export interface NodeRecord {
     id: number;
     name: string;
