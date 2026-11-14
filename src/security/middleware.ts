@@ -370,6 +370,92 @@ export function requireRole(
 }
 
 /**
+ * Requires that the signed-in principal has actually satisfied a second factor.
+ *
+ * Node join approval is the highest-value action in the panel: approving it
+ * hands out credentials for a machine that will run customer servers. A stolen
+ * session cookie or a leaked API key must not be enough.
+ *
+ * Rules:
+ *  - API-key principals are always rejected. A key cannot prove possession of a
+ *    TOTP device, so it must never authorise this class of action.
+ *  - Password sessions must have passed 2FA. Rows written before this check
+ *    existed (no `twoFactorVerifiedAt`) are rejected, which forces a re-login
+ *    rather than trusting an old session.
+ */
+export function requireSecondFactor(req: Request, res: Response, next: NextFunction) {
+  const isApiReq =
+    (req.originalUrl || req.path).startsWith('/api/') ||
+    req.headers.accept?.includes('application/json');
+  const deny = (status: number, code: string, error: string) => {
+    if (isApiReq) return res.status(status).json({ error, code, requires2FA: true });
+    return res.redirect(`/login/2fa?next=${encodeURIComponent(req.originalUrl || '/admin/nodes')}`);
+  };
+
+  if (!req.principal) {
+    return isApiReq
+      ? res.status(401).json({ error: 'Authentication required', code: 'auth_required' })
+      : res.redirect('/login');
+  }
+
+  if (req.principal.viaApiKey) {
+    return deny(
+      403,
+      'second_factor_required',
+      'This action requires a browser session with two-factor authentication. API keys cannot approve node joins.'
+    );
+  }
+
+  const sess: any = (req as any).session;
+  const verifiedAt = Number(sess?.twoFactorVerifiedAt || 0);
+  const enrolled = Boolean(sess?.twoFactorEnrolled);
+  const userId = Number(sess?.userId || 0);
+  const verifiedFor = Number(sess?.twoFactorVerifiedFor || 0);
+
+  if (!userId) {
+    return deny(
+      403,
+      'second_factor_required',
+      'Two-factor authentication is required for this action. Sign in again.'
+    );
+  }
+
+  if (!enrolled) {
+    // No authenticator on this account. Refuse with a message that says how to
+    // fix it rather than a bare 403. Enrolling is one page and takes a minute.
+    return deny(
+      403,
+      'enrol_2fa_first',
+      'Set up two-factor authentication on your account before approving nodes. ' +
+        'Go to Profile → Two-Factor Authentication to enrol, then sign in again.'
+    );
+  }
+
+  // A session that belongs to a different user than the one that verified is
+  // a session-fixation smell; refuse rather than guess.
+  if (!verifiedAt || verifiedFor !== userId) {
+    return deny(
+      403,
+      'second_factor_required',
+      'Two-factor authentication is required for this action. Sign in again and complete the 2FA step.'
+    );
+  }
+
+  // Bound the window: a session verified last week should not silently approve
+  // a machine today. Matches the typical re-auth expectation for privileged acts.
+  const maxAgeMs = Number(process.env.TGVPANEL_2FA_REAUTH_MINUTES || 60) * 60_000;
+  if (Date.now() - verifiedAt > maxAgeMs) {
+    return deny(
+      403,
+      'second_factor_stale',
+      'Your two-factor verification has expired. Confirm your code again to continue.'
+    );
+  }
+
+  return next();
+}
+
+/**
  * Strict input validators preventing shell metacharacters, path traversal, and invalid identifiers.
  */
 export const SafeValidators = {

@@ -107,10 +107,6 @@ export function createUnifiedWebRouter(
       const remaining = await countUnusedRecoveryCodes(ctx.db as any, row.id);
 
       delete sess.pending2faUser;
-      sess.user = pending;
-      sess.userId = pending.id;
-      sess.username = pending.username;
-      sess.role = pending.role;
 
       // Fresh session id once the second factor passes, so a pre-auth session
       // id cannot be fixated into an authenticated one.
@@ -120,6 +116,11 @@ export function createUnifiedWebRouter(
       fresh.userId = pending.id;
       fresh.username = pending.username;
       fresh.role = pending.role;
+      // Privileged actions (node approval) require proof that a second factor
+      // was satisfied *in this session*.
+      fresh.twoFactorVerifiedAt = Date.now();
+      fresh.twoFactorVerifiedFor = pending.id;
+      fresh.twoFactorEnrolled = true;
 
       await ctx.db.run(`UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?`, [row.id]);
       await ctx.db.logActivity({

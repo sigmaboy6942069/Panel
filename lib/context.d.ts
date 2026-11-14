@@ -12,6 +12,7 @@ import { BackupSnapshotManager } from './services/backup/BackupSnapshotManager';
 import { MigrationManager } from './services/migration/MigrationManager';
 import { MonitoringService } from './services/monitoring/MonitoringService';
 import { ResellerService } from './services/reseller/ResellerService';
+import { NodeJoinApprovalService } from './services/nodes/NodeJoinApproval';
 export interface HkvmRuntimeContext {
     db: UnifiedDatabase;
     nodeManager: NodeManager;
@@ -26,6 +27,8 @@ export interface HkvmRuntimeContext {
     monitoringService: MonitoringService;
     /** Upstream reseller integration (Bukkit-Hosting KVM provisioning). */
     reseller: ResellerService;
+    /** Two-phase node enrolment: a token starts a request, an admin approves it. */
+    joinApprovals: NodeJoinApprovalService;
 }
 export declare function initializeUnifiedHkvmRuntime(rawDb: sqlite3.Database, dbPath: string, legacyKvmHooks?: LegacyKvmHooks): Promise<HkvmRuntimeContext>;
 export declare function getHkvmRuntimeContext(): HkvmRuntimeContext;

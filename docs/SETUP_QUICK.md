@@ -166,13 +166,48 @@ Nothing else. No menu, no prompts, no questions. In one pass it:
 | Dependencies | Node.js 20+, LXC, KVM tooling, build tools |
 | Code | clones the repo to `/opt/tgvpanel` and builds it |
 | TLS | generates a 4096-bit cert with SANs for the node's IP and hostname |
-| Pairing | redeems the token, receives API key + HMAC secret |
+| Pairing | submits the token and **waits for your approval** |
+| Approval | you press Approve in the panel, confirmed with 2FA |
 | Config | writes every value into `.env`, `chmod 600` |
 | Firewall | opens the agent port if ufw/firewalld is active |
 | Service | installs and starts `tgvpanel-node-agent` 24/7 |
 | Verify | polls its own `/ping` until the agent answers |
 
 Then prints `Node #N paired, TLS-pinned, and running 24/7 at ...`.
+
+### 3c. Approve it — this is the part that needs you
+
+The command does **not** collect credentials on its own. It prints:
+
+```
+[ WARN ] This panel requires an administrator to approve new nodes.
+
+  Open this in the panel and press Approve:
+    https://your-panel.com/admin/nodes
+```
+
+Leave it running and go to **Admin → Nodes**. A panel appears at the top:
+
+```
+🔐 Node join requests awaiting approval            [1]
+  edge-01 · 203.0.113.50 · port 8443
+  requesting IP 198.51.100.9 · expires in 28 min
+                            [Approve]  [Deny]
+```
+
+Press **Approve**. The node picks up its credentials within a few seconds and
+finishes installing. Press **Deny** and it stops with your reason.
+
+**Approval requires 2FA.** If your account has no authenticator set up, the
+panel sends you to enrol first. If you have one but this session has not
+confirmed it (or it was over an hour ago), you are asked for a code.
+
+That is the point: **a join token on its own cannot enrol a machine.** Someone
+who reads the token out of your shell history, a screenshot, or a chat message
+gets a request you can see and refuse — not working credentials.
+
+> Nobody can approve silently. The approval is written to the activity log with
+> your username, the node, and the requesting IP.
 
 Within a minute the node shows **ONLINE** in **Admin → Nodes**. If it doesn't,
 jump to [troubleshooting](SETUP_DETAILED.md#how-online-is-decided) — don't

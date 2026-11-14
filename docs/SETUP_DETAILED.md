@@ -216,6 +216,56 @@ sudo bash menu.sh --join "https://panel.example.com" "tgv_join_YOUR_TOKEN"
 Writes the node's ID, API key and HMAC secret into the node's `.env`, sets the
 controller URL for outbound heartbeats, and starts the agent.
 
+### Two-phase enrolment
+
+Enrolment is deliberately not one step. A join token is a **bearer credential**:
+it travels through shell history, terminal scrollback, pasted commands and chat
+messages. Before approval existed, anyone who saw it could enrol a machine and
+receive working agent credentials for your cluster.
+
+The flow is now:
+
+| Phase | Who | What happens |
+| --- | --- | --- |
+| 1 | node | `POST /api/v1/nodes/join/:token` — validated, recorded as `pending` |
+| 2 | admin | opens the panel, passes 2FA, presses **Approve** |
+| 3 | node | polls `GET /api/v1/nodes/join/status/:pendingId`, collects once |
+
+Design points worth knowing:
+
+- **The token is not consumed in phase 1.** A denied or expired request leaves
+  the token usable for a retry. It is burned in phase 3, at the moment
+  credentials are actually handed over.
+- **Credentials are minted at approval**, not at request time, and stored
+  encrypted until collected. Nothing exists to steal in between.
+- **Collection is atomic.** The row flips to `collected` inside the same
+  statement that authorises the read, so two concurrent pollers cannot both
+  receive the secrets.
+- **The poll handle is not the token.** `tgv_req_...` only lets its holder watch
+  a request. It cannot approve it or complete it.
+- **One live request per node.** A retry supersedes the previous pending row, so
+  an admin cannot approve a stale request by accident.
+- **TLS certificates are attached at approval**, so a pinning change from the
+  joining machine is something an admin sees before it takes effect.
+
+### Approval requires a second factor
+
+`requireSecondFactor` fronts the approve, deny and list endpoints. It refuses:
+
+| Situation | Why |
+| --- | --- |
+| API key principal | A key cannot prove possession of a TOTP device |
+| No authenticator enrolled | Nothing to verify; message links to enrolment |
+| Session never passed 2FA | Password alone is one factor |
+| Verification older than 60 min | Privileged acts should be fresh |
+| Verification belongs to another user | Session-fixation guard |
+
+Enrolment is one page (**Profile → Two-Factor Authentication**) and takes a
+minute. The re-auth window is `TGVPANEL_2FA_REAUTH_MINUTES`, default `60`.
+
+Approval is opt-out via `node_join_requires_approval`, but the default is **on**,
+and a missing setting fails safe to on.
+
 ### How "online" is decided
 
 The agent pushes a signed heartbeat **outbound** to the controller every 45s.
@@ -456,6 +506,7 @@ without a live call on every page load.
 | At rest | AES-256-GCM via `.tgvpanel-secret` |
 | Node transport | HMAC-SHA256, ±300s replay window |
 | Node identity | per-node API key + HMAC secret |
+| Node enrolment | token + admin approval with 2FA, single-issue credentials |
 | Tunnel | SSH key, outbound only |
 | Second factor | TOTP, replay-protected, single-use recovery codes |
 | Social sign-in | OAuth 2.0 + PKCE, constant-time state, hashed secrets |

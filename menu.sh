@@ -1200,11 +1200,91 @@ headless_join_node() {
       req.end();
     ')"
 
+  # ---- Approval gate -------------------------------------------------------
+  # The panel may answer 202 + pending_approval instead of issuing credentials.
+  # In that case an admin has to open the panel, sign in and confirm with 2FA.
+  # We wait here (polling) rather than exiting, so the operator still pastes a
+  # single command and simply walks over to the panel.
+  local join_state pending_id
+  join_state="$(printf "%s" "$join_json" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(String(j.status||"approved"));')"
+
+  if [[ "$join_state" == "pending_approval" ]]; then
+    pending_id="$(printf "%s" "$join_json" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(String(j.pendingId));')"
+
+    echo ""
+    warn "This panel requires an administrator to approve new nodes."
+    echo ""
+    printf '  %sOpen this in the panel and press Approve:%s\n' "$C_CYAN" "$C_RESET"
+    printf '    %s/%s\n' "${controller_url%/}" "admin/nodes"
+    echo ""
+    printf '  %sYour click is protected by 2FA — only a signed-in admin can approve.%s\n' "$C_CYAN" "$C_RESET"
+    echo ""
+    info "Waiting for approval (this expires in 30 minutes)..."
+    echo ""
+
+    local poll_json poll_state waited=0 max_wait=1800
+    while [[ $waited -lt $max_wait ]]; do
+      sleep 4
+      waited=$((waited + 4))
+
+      poll_json="$(TGVP_CTRL="$controller_url" TGVP_PID="$pending_id" node -e '
+        const http = require("http"), https = require("https");
+        const base = process.env.TGVP_CTRL.replace(/\/+$/, "") + "/";
+        const u = new URL("api/v1/nodes/join/status/" + encodeURIComponent(process.env.TGVP_PID), base);
+        const mod = u.protocol === "https:" ? https : http;
+        const req = mod.request(u, { method: "GET", rejectUnauthorized: false }, (res) => {
+          let d = "";
+          res.on("data", (c) => d += c);
+          res.on("end", () => {
+            // A 202/403/410 still carries a JSON body worth reading.
+            process.stdout.write(d || "{}");
+          });
+        });
+        req.on("error", () => { process.stdout.write("{}"); });
+        req.setTimeout(10000, () => { req.destroy(); process.stdout.write("{}"); });
+        req.end();
+      ' 2>/dev/null)"
+
+      poll_state="$(printf "%s" "$poll_json" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write(String(JSON.parse(d).status||"pending"))}catch{process.stdout.write("pending")}})' 2>/dev/null)"
+      poll_state="${poll_state:-pending}"
+
+      if [[ "$poll_state" == "approved" ]]; then
+        join_json="$poll_json"
+        ok "Approved by an administrator."
+        break
+      fi
+      if [[ "$poll_state" == "denied" ]]; then
+        local deny_reason
+        deny_reason="$(printf "%s" "$poll_json" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write(String(JSON.parse(d).reason||"Denied"))}catch{process.stdout.write("Denied")}})' 2>/dev/null)"
+        err "Join request denied: ${deny_reason:-Denied by administrator}"
+        exit 1
+      fi
+      if [[ "$poll_state" == "expired" || "$poll_state" == "unknown" ]]; then
+        err "Join request expired or was superseded. Run this command again for a fresh request."
+        exit 1
+      fi
+
+      printf '.'
+      [[ $((waited % 60)) -eq 0 ]] && printf ' (%ss)\n' "$waited"
+    done
+    echo ""
+
+    if [[ "$(printf "%s" "$join_json" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(String(j.status||""));')" != "approved" ]]; then
+      err "Timed out waiting for approval. Run the command again when an admin is available."
+      exit 1
+    fi
+  fi
+
   local node_id node_api_key node_hmac_secret lxc_dir
   node_id="$(printf "%s" "$join_json" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(String(j.nodeId));')"
   node_api_key="$(printf "%s" "$join_json" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(String(j.apiKey));')"
   node_hmac_secret="$(printf "%s" "$join_json" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(String(j.hmacSecret));')"
   lxc_dir="${TGVPANEL_LXC_DIR:-/var/lib/lxc}"
+
+  if [[ -z "$node_api_key" || -z "$node_hmac_secret" ]]; then
+    err "The panel approved the request but did not return credentials. Generate a new join token and retry."
+    exit 1
+  fi
 
   cd "$APP_DIR"
   mkdir -p "$APP_DIR/data" "$APP_DIR/backups"

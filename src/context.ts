@@ -16,6 +16,7 @@ import { BackupSnapshotManager } from './services/backup/BackupSnapshotManager';
 import { MigrationManager } from './services/migration/MigrationManager';
 import { MonitoringService } from './services/monitoring/MonitoringService';
 import { ResellerService } from './services/reseller/ResellerService';
+import { NodeJoinApprovalService } from './services/nodes/NodeJoinApproval';
 import { normalizeRole } from './security/middleware';
 
 export interface HkvmRuntimeContext {
@@ -32,6 +33,8 @@ export interface HkvmRuntimeContext {
   monitoringService: MonitoringService;
   /** Upstream reseller integration (Bukkit-Hosting KVM provisioning). */
   reseller: ResellerService;
+  /** Two-phase node enrolment: a token starts a request, an admin approves it. */
+  joinApprovals: NodeJoinApprovalService;
 }
 
 let activeContext: HkvmRuntimeContext | null = null;
@@ -90,6 +93,7 @@ export async function initializeUnifiedHkvmRuntime(
   // A local (own-node) provider needs the virtualization layer to create real
   // instances when a customer orders.
   const reseller = new ResellerService(db, virtManager);
+  const joinApprovals = new NodeJoinApprovalService(db);
 
   if (
     process.env.TGVPANEL_DISABLE_BACKGROUND_POLLER !== 'true' &&
@@ -116,6 +120,7 @@ export async function initializeUnifiedHkvmRuntime(
     migrationManager,
     monitoringService,
     reseller,
+    joinApprovals,
   };
 
   return activeContext;

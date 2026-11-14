@@ -19,6 +19,7 @@ import {
   createRateLimiter,
   requirePrincipal,
   requireRole,
+  requireSecondFactor,
 } from '../../security/middleware';
 import {
   describeTwoFactorState,
@@ -175,6 +176,37 @@ export function createApiV1Router(ctx: HkvmRuntimeContext): Router {
           (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
           req.socket.remoteAddress ||
           '';
+
+        // Phase 1 of the approval flow. When approval is required this records
+        // the request and returns a handle; no credentials exist yet and the
+        // token has not been consumed.
+        const needsApproval = (await ctx.joinApprovals.summary()).requiresApproval;
+        if (needsApproval) {
+          const pending = await ctx.joinApprovals.beginJoin({
+            rawToken: pStr(req.params.token),
+            endpointUrl: req.body?.endpointUrl ? String(req.body.endpointUrl) : undefined,
+            ipAddress: req.body?.ipAddress ? String(req.body.ipAddress) : undefined,
+            hostname: req.body?.hostname ? String(req.body.hostname) : undefined,
+            agentPort: req.body?.agentPort ? Number(req.body.agentPort) : undefined,
+            tlsCertPem: req.body?.tlsCertPem ? String(req.body.tlsCertPem) : null,
+            verifySsl: req.body?.verifySsl !== undefined ? Boolean(req.body.verifySsl) : undefined,
+            callerIp,
+          });
+          await ctx.db.logActivity({
+            action: 'node_join_requested',
+            resourceType: 'node',
+            resourceId: String(pending.nodeId),
+            ipAddress: callerIp,
+            details: { pendingId: pending.pendingId, nodeName: pending.nodeName },
+          });
+          return res.status(202).json({
+            ...pending,
+            status: 'pending_approval',
+            message:
+              'An administrator must approve this node in the panel. This command keeps waiting.',
+          });
+        }
+
         const out = await ctx.nodeManager.redeemJoinToken({
           rawToken: pStr(req.params.token),
           endpointUrl: req.body?.endpointUrl ? String(req.body.endpointUrl) : undefined,
@@ -193,6 +225,102 @@ export function createApiV1Router(ctx: HkvmRuntimeContext): Router {
           details: { nodeName: out.nodeName, url: out.url },
         });
         return res.json(out);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+  );
+
+  // --- Phase 3 of approval: the node polls here until an admin decides ---
+  router.get('/nodes/join/status/:pendingId', async (req: Request, res: Response) => {
+    try {
+      const out = await ctx.joinApprovals.collectJoin(pStr(req.params.pendingId));
+
+      if (out.state === 'collected') {
+        await ctx.db.logActivity({
+          action: 'node_join_collected',
+          resourceType: 'node',
+          resourceId: String(out.credentials.nodeId),
+          ipAddress: req.socket.remoteAddress || null,
+        });
+        return res.json({ ...out.credentials, status: 'approved' });
+      }
+      if (out.state === 'pending') return res.status(202).json(out);
+      if (out.state === 'denied') return res.status(403).json({ ...out, status: 'denied' });
+      if (out.state === 'expired') {
+        return res.status(410).json({
+          status: 'expired',
+          error: 'This join request expired before it was approved. Run the command again.',
+        });
+      }
+      return res.status(404).json({ status: 'unknown', error: 'Unknown join request.' });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Admin decision on a pending join request ---
+  // Both handlers require a fully authenticated session AND a satisfied second
+  // factor. `requireSecondFactor` is defined below.
+  router.get(
+    '/nodes/join-requests',
+    requireRole(['admin']),
+    requireSecondFactor,
+    async (_req: Request, res: Response) => {
+      try {
+        await ctx.joinApprovals.reapExpired();
+        const [pending, policy] = await Promise.all([
+          ctx.joinApprovals.listPending(),
+          ctx.joinApprovals.summary(),
+        ]);
+        return res.json({ ...policy, requests: pending });
+      } catch (err: any) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
+  );
+
+  router.post(
+    '/nodes/join-requests/:pendingId/approve',
+    requireRole(['admin']),
+    requireSecondFactor,
+    async (req: Request, res: Response) => {
+      try {
+        const out = await ctx.joinApprovals.approve(pStr(req.params.pendingId), req.principal!.userId);
+        await ctx.db.logActivity({
+          userId: req.principal!.userId,
+          action: 'node_join_approved',
+          resourceType: 'node',
+          resourceId: String(out.nodeId),
+          ipAddress: req.ip || null,
+          details: { nodeName: out.nodeName, pendingId: pStr(req.params.pendingId) },
+        });
+        return res.json({ success: true, ...out });
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+  );
+
+  router.post(
+    '/nodes/join-requests/:pendingId/deny',
+    requireRole(['admin']),
+    requireSecondFactor,
+    async (req: Request, res: Response) => {
+      try {
+        await ctx.joinApprovals.deny(
+          pStr(req.params.pendingId),
+          req.principal!.userId,
+          String(req.body?.reason || 'Denied by administrator')
+        );
+        await ctx.db.logActivity({
+          userId: req.principal!.userId,
+          action: 'node_join_denied',
+          resourceType: 'node',
+          resourceId: pStr(req.params.pendingId),
+          ipAddress: req.ip || null,
+        });
+        return res.json({ success: true });
       } catch (err: any) {
         return res.status(400).json({ error: err.message });
       }

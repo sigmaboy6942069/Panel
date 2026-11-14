@@ -45,6 +45,21 @@ export declare function normalizeRole(role?: string | null): 'admin' | 'subadmin
 export declare function requirePrincipal(req: Request, res: Response, next: NextFunction): void | Response<any, Record<string, any>>;
 export declare function requireRole(allowedRoles: Array<'admin' | 'subadmin' | 'operator' | 'user' | 'readonly'>): (req: Request, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
 /**
+ * Requires that the signed-in principal has actually satisfied a second factor.
+ *
+ * Node join approval is the highest-value action in the panel: approving it
+ * hands out credentials for a machine that will run customer servers. A stolen
+ * session cookie or a leaked API key must not be enough.
+ *
+ * Rules:
+ *  - API-key principals are always rejected. A key cannot prove possession of a
+ *    TOTP device, so it must never authorise this class of action.
+ *  - Password sessions must have passed 2FA. Rows written before this check
+ *    existed (no `twoFactorVerifiedAt`) are rejected, which forces a re-login
+ *    rather than trusting an old session.
+ */
+export declare function requireSecondFactor(req: Request, res: Response, next: NextFunction): void | Response<any, Record<string, any>>;
+/**
  * Strict input validators preventing shell metacharacters, path traversal, and invalid identifiers.
  */
 export declare const SafeValidators: {

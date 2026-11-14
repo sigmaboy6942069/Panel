@@ -1331,6 +1331,24 @@
         </div>
       </div>
 
+      <!-- Pending node join approvals. Hidden until there is something to act on. -->
+      <div id="joinApprovalPanel" style="display:none;margin-bottom:16px;border-radius:11px;border:1px solid rgba(245,158,11,0.42);background:rgba(245,158,11,0.07);">
+        <div style="display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid rgba(245,158,11,0.25);">
+          <span style="font-size:17px;">🔐</span>
+          <div style="flex:1;">
+            <div style="font-size:13.5px;font-weight:700;color:var(--text-primary);">
+              Node join requests awaiting approval
+              <span id="joinPendingCount" class="st-tag" style="background:rgba(245,158,11,0.2);color:#f59e0b;margin-left:6px;">0</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">
+              A machine ran the join command. Nothing is enrolled until you approve it — and approval needs your 2FA.
+            </div>
+          </div>
+          <button type="button" class="btn btn-outline" onclick="loadJoinRequests()">Refresh</button>
+        </div>
+        <div id="joinRequestList" style="padding:6px 16px 14px;"></div>
+      </div>
+
       <div class="st-kpi-grid" id="nodesKpiGrid">
         <div class="st-kpi-card">
           <div class="st-kpi-top">
@@ -3474,6 +3492,133 @@ async function testNewNodeConnection() {
   }
 }
 
+// ---------- Node join approvals ----------
+// Only reachable for an admin who has passed 2FA. If the server refuses, the
+// panel explains why instead of showing a broken button.
+async function loadJoinRequests() {
+  const panelEl = document.getElementById('joinApprovalPanel');
+  const listEl = document.getElementById('joinRequestList');
+  const countEl = document.getElementById('joinPendingCount');
+  if (!panelEl || !listEl) return;
+
+  try {
+    const res = await fetch('/api/v1/nodes/join-requests', {
+      credentials: 'same-origin',
+      headers: { 'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '' }
+    });
+
+    if (res.status === 403) {
+      const data = await res.json().catch(() => ({}));
+      if (data.code === 'enrol_2fa_first' || data.code === 'second_factor_required' || data.code === 'second_factor_stale') {
+        panelEl.style.display = 'block';
+        countEl.textContent = '!';
+        listEl.innerHTML =
+          '<div style="padding:10px 0;font-size:12.5px;color:#f59e0b;line-height:1.6;">' +
+          escapeHtml(data.error || 'Two-factor authentication required.') +
+          '</div>' +
+          (data.code === 'enrol_2fa_first'
+            ? '<a href="/settings/2fa" class="btn btn-primary" style="margin-top:6px;">Set up 2FA</a>'
+            : '<a href="/login/2fa" class="btn btn-primary" style="margin-top:6px;">Confirm with 2FA</a>');
+        return;
+      }
+      panelEl.style.display = 'none';
+      return;
+    }
+
+    const data = await res.json();
+    const requests = data.requests || [];
+
+    if (requests.length === 0) {
+      panelEl.style.display = 'none';
+      return;
+    }
+
+    panelEl.style.display = 'block';
+    countEl.textContent = String(requests.length);
+
+    listEl.innerHTML = requests.map((r) => {
+      const minsLeft = Math.max(0, Math.round((new Date(r.expires_at).getTime() - Date.now()) / 60000));
+      return `
+        <div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,0.06);flex-wrap:wrap;">
+          <div style="flex:1;min-width:220px;">
+            <div style="font-size:13px;font-weight:600;color:var(--text-primary);">
+              ${escapeHtml(r.node_name || 'node')}
+              ${r.has_cert ? '<span class="st-tag" style="background:rgba(16,185,129,0.15);color:#10b981;margin-left:6px;font-size:10px;">TLS pinned</span>' : ''}
+            </div>
+            <div style="font-size:11.5px;color:var(--text-muted);margin-top:3px;font-family:monospace;">
+              ${escapeHtml(r.hostname || '-')} · ${escapeHtml(r.ip_address || '-')} · port ${escapeHtml(String(r.agent_port || '-'))}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+              requesting IP ${escapeHtml(r.caller_ip || 'unknown')} · expires in ${minsLeft} min
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-primary" onclick="approveJoinRequest('${escapeHtml(r.pending_id)}', '${escapeHtml(r.node_name || 'node')}')">Approve</button>
+            <button class="btn btn-outline" onclick="denyJoinRequest('${escapeHtml(r.pending_id)}', '${escapeHtml(r.node_name || 'node')}')">Deny</button>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    panelEl.style.display = 'none';
+  }
+}
+
+async function approveJoinRequest(pendingId, nodeName) {
+  if (!confirm('Approve ' + nodeName + '?\n\nThis machine will receive credentials and join your cluster.')) return;
+  try {
+    const res = await fetch('/api/v1/nodes/join-requests/' + encodeURIComponent(pendingId) + '/approve', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || ''
+      },
+      body: '{}'
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (data.requires2FA) {
+        window.location.href = data.code === 'enrol_2fa_first' ? '/settings/2fa' : '/login/2fa';
+        return;
+      }
+      throw new Error(data.error || 'Could not approve');
+    }
+    if (window.hkvmToast) hkvmToast(nodeName + ' approved — the node is collecting credentials', 'success');
+    loadJoinRequests();
+    if (typeof loadNodes === 'function') loadNodes();
+  } catch (e) {
+    if (window.hkvmToast) hkvmToast(e.message, 'error');
+  }
+}
+
+async function denyJoinRequest(pendingId, nodeName) {
+  const reason = prompt('Why are you denying ' + nodeName + '?', 'Not authorised');
+  if (reason === null) return;
+  try {
+    const res = await fetch('/api/v1/nodes/join-requests/' + encodeURIComponent(pendingId) + '/deny', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || ''
+      },
+      body: JSON.stringify({ reason })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not deny');
+    if (window.hkvmToast) hkvmToast('Request denied', 'success');
+    loadJoinRequests();
+  } catch (e) {
+    if (window.hkvmToast) hkvmToast(e.message, 'error');
+  }
+}
+
+function escapeHtml(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 async function loadNodes() {
   const data = await hkvmApi('/api/v1/nodes');
   __cachedNodes = data.nodes || [];
@@ -5551,7 +5696,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (CURRENT_SECTION === 'instances') loadUnifiedInstances();
   if (CURRENT_SECTION === 'instances-create') initLxcCreateStudio();
   if (CURRENT_SECTION === 'lxc') loadLxcList();
-  if (CURRENT_SECTION === 'nodes') loadNodes();
+  if (CURRENT_SECTION === 'nodes') { loadNodes(); loadJoinRequests(); }
   if (CURRENT_SECTION === 'storage') loadStorage(true);
   if (CURRENT_SECTION === 'isos') loadIsos();
   if (CURRENT_SECTION === 'lxc-templates') loadLxcTemplates();
