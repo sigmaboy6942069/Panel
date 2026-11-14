@@ -1491,7 +1491,7 @@
                   Recommended: Run this single command on the remote Linux server (auto-installs, generates &amp; pins TLS cert, configures <code>.env</code>, and starts 24/7):
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;">
-                  <input id="joinCtrlUrlInput" style="font-size:11.5px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.25);color:var(--text-primary);min-width:210px;" placeholder="https://panel.example.com">
+                  <input id="joinCtrlUrlInput" value="<%= typeof panelPublicUrl !== 'undefined' && panelPublicUrl ? panelPublicUrl : '' %>" style="font-size:11.5px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.25);color:var(--text-primary);min-width:210px;" placeholder="https://panel.example.com">
                   <button type="button" class="st-copy-mini" onclick="regenerateJoinTokenForActiveNode()">Refresh Token</button>
                 </div>
               </div>
@@ -4178,7 +4178,8 @@ async function openNodePairDrawer(nodeId, freshCreds) {
   const copyJoinBtn = document.getElementById('copyJoinCmdBtn');
   const titleEl = document.getElementById('nodeCredsTitle');
   const ctrlInput = document.getElementById('joinCtrlUrlInput');
-  const ctrlUrl = (ctrlInput?.value || window.location.origin).trim() || window.location.origin;
+  const __panelPublicUrl = '<%= typeof panelPublicUrl !== "undefined" && panelPublicUrl ? panelPublicUrl : "" %>';
+  const ctrlUrl = (ctrlInput?.value || __panelPublicUrl || window.location.origin).trim() || window.location.origin;
 
   if (wrap) wrap.style.display = 'block';
   if (box) box.style.display = 'block';

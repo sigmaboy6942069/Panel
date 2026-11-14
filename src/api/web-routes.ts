@@ -29,6 +29,10 @@ export function createUnifiedWebRouter(
     // never tells operators to install someone else's code.
     res.locals.panelRepoUrl = resolvePanelRepoUrl();
     res.locals.panelRepoRawBase = resolvePanelRawBase();
+    // What a compute node should be pointed at. Empty means "use whatever
+    // hostname the admin is browsing on", which is right for a panel reached
+    // through a domain or tunnel.
+    res.locals.panelPublicUrl = String(process.env.TGVPANEL_PUBLIC_URL || '').replace(/\/+$/, '');
     res.locals.siteLogo = res.locals.siteLogo || '/images/logo.png';
     res.locals.siteName =
       res.locals.siteName && !/^hkvm(\s+panel)?(\s+v[\d.]+)?$/i.test(String(res.locals.siteName).trim())

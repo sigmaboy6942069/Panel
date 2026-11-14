@@ -129,17 +129,9 @@ A **node** is a machine that runs customer servers. It runs
 `tgvpanel-node-agent` only — never the panel. A homeserver or a rented dedicated
 box both work; it needs root and a public IP (or SSH access).
 
-### 3a. On the node — install the agent
+This is **one command on the node**. The panel hands it to you already filled in.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/sigmaboy6942069/Panel/main/menu.sh -o menu.sh
-sudo bash menu.sh
-```
-
-Choose **remote node agent / auto-join**. This installs Node.js, LXC, KVM tooling
-if available, and the agent service. It does **not** create a panel or a database.
-
-### 3b. On the panel — register the node
+### 3a. On the panel — register the node
 
 **Admin → Nodes → Register Remote Node**:
 
@@ -147,24 +139,55 @@ if available, and the agent service. It does **not** create a panel or a databas
 | --- | --- |
 | Node name | `home-node-1` |
 | IPv4 | the node's public IP |
-| Agent URL | `http://127.0.0.1:5055` *(tunnel mode)* |
+| Agent URL | `https://NODE_IP:8443` *(or `http://127.0.0.1:5055` in tunnel mode)* |
 | Datacenter | free text, e.g. `Home, BE` |
 | Allowed engines | tick KVM and/or LXC |
 
-Click **Register Node** and copy the `tgv_join_...` token it shows. It's
-single-use and expires — if you lose it, the **Pair** button reissues one.
-
-### 3c. On the node — pair it
+The **Pair** panel then shows a ready-to-run command. Press **Copy Auto-Join
+Command**. It looks like:
 
 ```bash
-sudo bash menu.sh --join "https://panel.example.com" "tgv_join_YOUR_TOKEN"
+curl -fsSL https://raw.githubusercontent.com/sigmaboy6942069/Panel/main/menu.sh -o menu.sh && chmod +x menu.sh && sudo bash menu.sh --join "https://your-panel.com" "tgv_join_..."
 ```
 
-This redeems the token and stamps the node's identity into its `.env`.
+The `tgv_join_...` token is **single-use and expires in 30 minutes**. Lost it?
+Press **Refresh Token** — the old one dies immediately.
 
-Within a minute the node should show **ONLINE** in **Admin → Nodes**. If it
-doesn't, jump to [troubleshooting](SETUP_DETAILED.md#how-online-is-decided) — don't
+> The controller URL box is pre-filled from `TGVPANEL_PUBLIC_URL` if you set it,
+> otherwise from the address you are browsing the panel on. If you reach the
+> panel over an internal IP and the node needs the public one, type it here.
+
+### 3b. On the node — paste that one command
+
+Nothing else. No menu, no prompts, no questions. In one pass it:
+
+| Step | What happens |
+| --- | --- |
+| Dependencies | Node.js 20+, LXC, KVM tooling, build tools |
+| Code | clones the repo to `/opt/tgvpanel` and builds it |
+| TLS | generates a 4096-bit cert with SANs for the node's IP and hostname |
+| Pairing | redeems the token, receives API key + HMAC secret |
+| Config | writes every value into `.env`, `chmod 600` |
+| Firewall | opens the agent port if ufw/firewalld is active |
+| Service | installs and starts `tgvpanel-node-agent` 24/7 |
+| Verify | polls its own `/ping` until the agent answers |
+
+Then prints `Node #N paired, TLS-pinned, and running 24/7 at ...`.
+
+Within a minute the node shows **ONLINE** in **Admin → Nodes**. If it doesn't,
+jump to [troubleshooting](SETUP_DETAILED.md#how-online-is-decided) — don't
 continue, nothing downstream will work.
+
+> **The node must be able to reach the controller URL** — that is how it redeems
+> the token. A Cloudflare Tunnel or public domain works. `127.0.0.1` will not:
+> the node is a different machine.
+
+### Re-running it
+
+Safe. Re-running with a **fresh token** repoints an existing node at the panel;
+existing LXC containers and the node's `.env` are reused rather than wiped. If a
+non-TGVPANEL directory occupies the install path, it is moved aside to
+`<dir>.bak.<timestamp>` first, never deleted.
 
 ---
 
