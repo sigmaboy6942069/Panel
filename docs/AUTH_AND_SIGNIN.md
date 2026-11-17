@@ -145,7 +145,18 @@ enabled or a credential is missing.
    https://your-panel-domain.com/auth/discord/callback
    ```
 
-5. Paste the credentials into **Admin → Settings → Sign-in → Discord** and enable.
+5. Paste the credentials into **Admin → Settings → Sign-in → Discord Authentication**.
+   It is a **separate section** from the *Social sign-in* cards above — tick
+   **Enable Discord Login**, fill in Client ID, Client Secret and the redirect
+   URI, then Save.
+
+> **Discord has two settings sections; use the right one.** The *Social sign-in*
+> cards cover Google, Discord and GitHub together. Discord also has its own
+> dedicated section lower on the same tab, which is the one that reveals the
+> **Login with Discord** button. Configuring either one works — the panel reads
+> both — but the dedicated section is the complete form (it also carries the
+> redirect URI and bot options). Don't fill in both; you'd have two disagreeing
+> records.
 
 Discord returns a verified email only for accounts that confirmed it. If
 someone's Discord email isn't verified, the panel will not silently attach their

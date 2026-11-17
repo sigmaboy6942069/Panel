@@ -16,7 +16,7 @@
 import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { HkvmRuntimeContext } from '../context';
-import { decryptSecret } from '../security/crypto-vault';
+import { decryptSecret, encryptSecret } from '../security/crypto-vault';
 import {
   OAuthProviderId,
   buildAuthorizeUrl,
@@ -65,8 +65,33 @@ export function createOAuthRouter(deps: OAuthRouteDeps): Router {
       `SELECT * FROM oauth_provider_settings WHERE provider = ?`,
       [provider]
     );
-    if (!row || !row.enabled || !row.client_id || !row.client_secret_enc) return null;
-    return row;
+    if (row && row.enabled && row.client_id && row.client_secret_enc) return row;
+
+    // Discord predates this generic path: it has its own Settings form backed by
+    // the older `discord_settings` table, and the login page reveals its button
+    // from that table. Without this fallback, enabling Discord the way the UI
+    // actually offers gets you a button that leads to "not enabled on this
+    // panel". Treat the legacy row as an equivalent source of truth.
+    if (provider === 'discord') {
+      const legacy = await ctx.db.get<any>(
+        `SELECT enabled, client_id, client_secret, redirect_uri FROM discord_settings LIMIT 1`
+      );
+      if (legacy && Number(legacy.enabled) === 1 && legacy.client_id && legacy.client_secret) {
+        return {
+          provider: 'discord',
+          enabled: 1,
+          client_id: legacy.client_id,
+          // Legacy secrets are stored in plain text; wrap on the way out so the
+          // rest of this router only ever sees the encrypted form.
+          client_secret_enc: encryptSecret(String(legacy.client_secret)),
+          redirect_uri: legacy.redirect_uri || null,
+          allow_signup: 0,
+          auto_link_verified_email: 1,
+        };
+      }
+    }
+
+    return null;
   }
 
   // --- Step 1: send the user to the provider ---
