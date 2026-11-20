@@ -183,21 +183,28 @@ function render(data) {
   });
 
   // ---------- wiring ----------
-  await check('the /terms route is registered and public', async () => {
+  await check('the /tos route is registered and public', async () => {
     const src = fs.readFileSync(path.join(ROOT, 'src', 'api', 'web-routes.ts'), 'utf8');
-    assert.match(src, /router\.get\('\/terms'/, '/terms route missing');
-    const block = src.slice(src.indexOf("router.get('/terms'"), src.indexOf("router.get('/terms'") + 1400);
-    assert.ok(!/requireRole|requirePrincipal|checkAuth/.test(block), '/terms must not require a session');
+    assert.match(src, /router\.get\('\/tos'/, '/tos route missing');
+    const block = src.slice(src.indexOf("router.get('/tos'"), src.indexOf("router.get('/tos'") + 1600);
+    assert.ok(!/requireRole|requirePrincipal|checkAuth/.test(block), '/tos must not require a session');
+  });
+
+  await check('/terms redirects to /tos so old links keep working', async () => {
+    const src = fs.readFileSync(path.join(ROOT, 'src', 'api', 'web-routes.ts'), 'utf8');
+    const line = src.split('\n').find((l) => l.includes("router.get('/terms'")) || '';
+    assert.ok(line.includes('redirect(301'), '/terms no longer redirects');
+    assert.ok(line.includes("'/tos'"), '/terms redirect does not point at /tos');
   });
 
   await check('the login page links to the terms', async () => {
     const src = fs.readFileSync(path.join(ROOT, 'views', 'users', 'login.ejs'), 'utf8');
-    assert.match(src, /href="\/terms"/, 'no way to reach the terms from the login page');
+    assert.match(src, /href="\/tos"/, 'no way to reach the terms from the login page');
   });
 
   await check('the privacy page links to the terms', async () => {
     const src = fs.readFileSync(path.join(ROOT, 'views', 'pages', 'privacy.ejs'), 'utf8');
-    assert.match(src, /termsUrl \|\| '\/terms'/, 'privacy footer does not fall back to /terms');
+    assert.match(src, /termsUrl \|\| '\/tos'/, 'privacy footer does not fall back to /tos');
   });
 
   console.log(`\n  ${pass} passed, ${fail} failed`);

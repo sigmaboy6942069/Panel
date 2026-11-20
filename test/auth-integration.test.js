@@ -397,15 +397,21 @@ async function waitForServer(timeoutMs = 40000) {
     });
 
     await check('an OAuth sign-in for a 2FA user lands on /login/2fa', async () => {
-      // The gate lives in completeOAuthLogin; assert the session it builds is a
-      // pending one rather than an authenticated one.
-      const src = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
-      const fn = src.slice(src.indexOf('function completeOAuthLogin'));
-      const bodyEnd = fn.indexOf('function createDiscordUser');
-      const body = fn.slice(0, bodyEnd);
-      assert.ok(/pending2faUser/.test(body), 'completeOAuthLogin no longer sets pending2faUser');
-      assert.ok(/two_factor_enabled/.test(body), 'completeOAuthLogin no longer checks 2FA');
-      assert.ok(/regenerate/.test(body), 'completeOAuthLogin no longer regenerates the session');
+      // The gate lives in the OAuth router, not app.js — it was moved there when
+      // the generic provider path replaced the Discord-only one. Checking app.js
+      // made this test pass vacuously (empty string matches every regex).
+      const src = fs.readFileSync(path.join(ROOT, 'src/api/oauth-routes.ts'), 'utf8');
+
+      // Both branches that can log someone in (existing link, and auto-link by
+      // verified email) must park the user in pending2faUser instead.
+      const gates = src.split('user.two_factor_enabled && user.two_factor_secret_enc').length - 1;
+      assert.ok(gates >= 2, `expected a 2FA gate on every login branch, found ${gates}`);
+      assert.ok(/pending2faUser/.test(src), 'the router no longer sets pending2faUser');
+      assert.ok(/\/login\/2fa/.test(src), 'the router no longer redirects to /login/2fa');
+
+      // And the session must be regenerated on success, not before the factor.
+      const finish = src.slice(src.indexOf('export function finishLogin'));
+      assert.ok(/regenerate/.test(finish), 'finishLogin no longer regenerates the session');
     });
 
     // ---------- 6. admin 2FA policy ----------

@@ -196,6 +196,27 @@
     require separate consent. Clearing it signs you out.
   </p>
 
+  <h2>2b. Legal bases</h2>
+  <p>
+    Under the GDPR, processing must rest on a legal basis. The panel relies on:
+  </p>
+  <ul>
+    <li><strong>Contract</strong> (Art. 6(1)(b)) — creating your account, running your
+      machines, billing you. Without this data there is no service to provide.</li>
+    <li><strong>Legal obligation</strong> (Art. 6(1)(c)) — retaining invoices and records
+      where accounting or tax law requires it.</li>
+    <li><strong>Legitimate interests</strong> (Art. 6(1)(f)) — keeping the service secure,
+      preventing abuse, and maintaining activity logs. These interests are balanced against
+      your rights, and you may object to them.</li>
+    <li><strong>Consent</strong> (Art. 6(1)(a)) — where you actively choose to link a
+      social sign-in account. You can withdraw this by unlinking it.</li>
+  </ul>
+  <p>
+    Strictly necessary cookies do not need consent under § 25 of the Belgian implementation
+    of the ePrivacy rules (Wet van 30 juli 2020 / Loi du 30 juillet 2020), which mirrors
+    Art. 5(3) of Directive 2002/58/EC.
+  </p>
+
   <h2>3. Who data is shared with</h2>
   <p>
     Data is not sold, rented, or traded. It is disclosed only in these situations:
@@ -264,8 +285,15 @@
   <p>
     To exercise any of these, contact
     <% if (contactEmail) { %><a href="mailto:<%= contactEmail %>"><%= contactEmail %></a><% } else { %>the operator<% } %>.
-    A response is normally given within one month. You also have the right to complain to
-    your local data protection authority.
+    A response is normally given within one month. Requests are free of charge unless they
+    are manifestly unfounded or excessive.
+  </p>
+  <p>
+    You also have the right to complain to a supervisory authority. In Belgium that is the
+    <strong>Belgian Data Protection Authority</strong>
+    (Gegevensbeschermingsautoriteit / Autorité de protection des données),
+    Drukpersstraat 35, 1000 Brussels — <a href="https://www.gegevensbeschermingsautoriteit.be" target="_blank" rel="noopener">gegevensbeschermingsautoriteit.be</a>.
+    You may complain there, or to the authority in the country where you live or work.
   </p>
 
   <h2>7. Security</h2>
@@ -304,7 +332,7 @@
 
   <footer>
     <a href="/login">&larr; Back to sign in</a>
-    <a href="<%= termsUrl || '/terms' %>">Terms of Service</a>
+    <a href="<%= termsUrl || '/tos' %>">Terms of Service</a>
     <span><%= siteName %> <%= panelVersion %></span>
   </footer>
 

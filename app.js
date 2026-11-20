@@ -958,335 +958,6 @@ app.get('/api/auth/check', (req, res) => {
   }
 });
 
-// ============= DISCORD OAUTH ROUTES =============
-
-const axios = require('axios');
-
-// Get Discord OAuth state from session
-function generateDiscordAuthUrl() {
-  return new Promise((resolve, reject) => {
-    db.get(`SELECT * FROM discord_settings WHERE enabled = 1`, (err, settings) => {
-      if (err || !settings || !settings.client_id) {
-        return reject(new Error('Discord auth not configured'));
-      }
-
-      const params = new URLSearchParams({
-        client_id: settings.client_id,
-        redirect_uri: settings.redirect_uri,
-        response_type: 'code',
-        scope: 'identify email',
-        state: require('crypto').randomBytes(16).toString('hex')
-      });
-
-      resolve({
-        url: `https://discord.com/api/oauth2/authorize?${params.toString()}`,
-        state: params.get('state')
-      });
-    });
-  });
-}
-
-// Check if Discord auth is enabled (public endpoint for login page)
-app.get('/api/discord-enabled', (req, res) => {
-  db.get(`SELECT enabled FROM discord_settings LIMIT 1`, (err, settings) => {
-    if (err || !settings) {
-      return res.json({ enabled: false });
-    }
-    res.json({ enabled: settings.enabled ? true : false });
-  });
-});
-
-app.get('/api/discord-auth-url', async (req, res) => {
-  try {
-    const authData = await generateDiscordAuthUrl();
-    req.session.discordState = authData.state;
-    res.json({ url: authData.url });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.get('/auth/discord/callback', async (req, res) => {
-  const { code, state } = req.query;
-  
-  if (!code) {
-    return res.redirect('/login?error=Discord authentication failed');
-  }
-
-  // Verify state to prevent CSRF
-  if (state !== req.session.discordState) {
-    console.error('[Discord Auth] State mismatch - possible CSRF attack');
-    return res.redirect('/login?error=State validation failed');
-  }
-
-  try {
-    // Get Discord settings
-    const settings = await new Promise((resolve, reject) => {
-      db.get(`SELECT * FROM discord_settings WHERE enabled = 1`, (err, s) => {
-        if (err || !s) reject(new Error('Discord auth not configured'));
-        else resolve(s);
-      });
-    });
-
-    // Exchange code for token
-    const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', {
-      client_id: settings.client_id,
-      client_secret: settings.client_secret,
-      code: code,
-      grant_type: 'authorization_code',
-      redirect_uri: settings.redirect_uri,
-      scope: 'identify email'
-    }, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
-
-    const access_token = tokenResponse.data.access_token;
-
-    // Get Discord user info
-    const userResponse = await axios.get('https://discord.com/api/users/@me', {
-      headers: { 'Authorization': `Bearer ${access_token}` }
-    });
-
-    const discordUser = userResponse.data;
-    const discordId = discordUser.id;
-    const discordUsername = discordUser.username;
-    const discordEmail = discordUser.email;
-    const discordAvatar = discordUser.avatar;
-
-    console.log(`[Discord Auth] User ${discordUsername} (${discordId}) authenticated`);
-
-    // Check if Discord account is already linked
-    db.get(`SELECT * FROM user_discord_accounts WHERE discord_id = ?`, [discordId], (err, linked) => {
-      if (err) {
-        console.error('[Discord Auth] DB error:', err);
-        return res.redirect('/login?error=Database error');
-      }
-
-      if (linked) {
-        // Already linked - update avatar and log them in
-        db.run(`UPDATE user_discord_accounts SET discord_avatar = ? WHERE discord_id = ?`, [discordAvatar || '', discordId], (err) => {
-          if (err) console.error('[Discord Auth] Failed to update avatar:', err);
-        });
-        
-        db.get(`SELECT * FROM users WHERE id = ?`, [linked.user_id], (err, user) => {
-          if (err || !user) {
-            return res.redirect('/login?error=User not found');
-          }
-          if (!user.is_active) {
-            return res.redirect('/login?error=This account has been disabled');
-          }
-
-          console.log(`[Discord Auth] User ${user.username} (${user.id}) authorised via Discord`);
-          completeOAuthLogin(user, req, res, { provider: 'discord', subject: discordId });
-        });
-      } else {
-        // Check if email exists in system
-        if (discordEmail) {
-          db.get(`SELECT * FROM users WHERE email = ?`, [discordEmail], (err, existingUser) => {
-            if (err) {
-              console.error('[Discord Auth] DB error:', err);
-              return res.redirect('/login?error=Database error');
-            }
-
-            if (existingUser) {
-              // Email exists - offer to link
-              req.session.pendingDiscordAuth = {
-                discordId: discordId,
-                discordUsername: discordUsername,
-                discordEmail: discordEmail,
-                discordAvatar: discordAvatar,
-                action: 'link'
-              };
-              res.redirect('/link-discord-account');
-            } else {
-              // New user - create account
-              createDiscordUser(discordId, discordUsername, discordEmail, discordAvatar, res, req);
-            }
-          });
-        } else {
-          // No email - require manual creation
-          req.session.pendingDiscordAuth = {
-            discordId: discordId,
-            discordUsername: discordUsername,
-            discordEmail: discordEmail,
-            discordAvatar: discordAvatar,
-            action: 'create'
-          };
-          res.redirect('/create-account-discord');
-        }
-      }
-    });
-  } catch (err) {
-    console.error('[Discord Auth] Error:', err.message);
-    res.redirect('/login?error=' + encodeURIComponent(err.message));
-  }
-});
-
-/**
- * Single gate every third-party sign-in must pass through.
- *
- * OAuth proves *who* the user is, not that they hold the second factor. An
- * attacker who steals a Discord session, or who controls an account with the
- * same verified email, would otherwise skip TOTP entirely. So the same
- * `pending2faUser` handshake used by password login is applied here.
- *
- * Also regenerates the session id, because a pre-login session that merely gets
- * `userId` bolted onto it is a session-fixation target.
- */
-function completeOAuthLogin(user, req, res, providerInfo) {
-  const finish = () => {
-    req.session.regenerate((regenErr) => {
-      if (regenErr) console.error('[OAuth Auth] Session regenerate failed:', regenErr);
-
-      req.session.userId = user.id;
-      req.session.username = user.username;
-      req.session.role = user.role;
-      req.session.user = { id: user.id, username: user.username, role: user.role };
-
-      db.run(`UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?`, [user.id]);
-      if (hkvmV3Context && providerInfo) {
-        hkvmV3Context.db
-          .logActivity({
-            userId: user.id,
-            action: `auth.login.${providerInfo.provider}`,
-            resourceType: 'user',
-            resourceId: user.id,
-            ipAddress: req.ip
-          })
-          .catch(() => undefined);
-      }
-
-      console.log(`[OAuth Auth] User ${user.username} (${user.id}) logged in via ${providerInfo?.provider || 'oauth'}`);
-      return res.redirect(user.role === 'admin' ? '/admin/dashboard' : '/dashboard');
-    });
-  };
-
-  if (user.two_factor_enabled && user.two_factor_secret_enc) {
-    // Park the identity, do not authenticate yet.
-    req.session.pending2faUser = {
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      email: user.email
-    };
-    return res.redirect('/login/2fa');
-  }
-
-  // Enforced-policy path: admin/subadmin without 2FA must enrol first.
-  db.get(
-    `SELECT setting_value FROM settings WHERE setting_key = 'require_2fa_for_admins'`,
-    [],
-    (polErr, pol) => {
-      if (polErr) console.error('[OAuth Auth] 2FA policy lookup failed:', polErr.message);
-      const policyOn = String(pol?.setting_value || '0') === '1';
-      if (policyOn && (user.role === 'admin' || user.role === 'subadmin')) {
-        req.session.userId = user.id;
-        req.session.username = user.username;
-        req.session.role = user.role;
-        req.session.mustSetup2FA = true;
-        return res.redirect('/settings/2fa?required=1');
-      }
-      finish();
-    }
-  );
-}
-
-function createDiscordUser(discordId, discordUsername, discordEmail, discordAvatar, res, req) {
-  const tempPassword = require('crypto').randomBytes(16).toString('hex');
-  const hashedPassword = bcrypt.hashSync(tempPassword, 10);
-
-  db.run(
-    `INSERT INTO users (username, password, email, full_name, role, is_active) VALUES (?, ?, ?, ?, ?, ?)`,
-    [discordUsername, hashedPassword, discordEmail, discordUsername, 'user', 1],
-    function(err) {
-      if (err) {
-        console.error('[Discord Auth] Failed to create user:', err);
-        return res.redirect('/login?error=Failed to create account');
-      }
-
-      const userId = this.lastID;
-
-      // Link Discord account
-      db.run(
-        `INSERT INTO user_discord_accounts (user_id, discord_id, discord_username, discord_email, discord_avatar) VALUES (?, ?, ?, ?, ?)`,
-        [userId, discordId, discordUsername, discordEmail, discordAvatar || ''],
-        (err) => {
-          if (err) {
-            console.error('[Discord Auth] Failed to link Discord account:', err);
-            return res.redirect('/login?error=Failed to link account');
-          }
-
-          console.log(`[Discord Auth] New user ${discordUsername} (${userId}) created via Discord`);
-          completeOAuthLogin(
-            { id: userId, username: discordUsername, role: 'user', email: discordEmail, is_active: 1 },
-            req,
-            res,
-            { provider: 'discord', subject: discordId }
-          );
-        }
-      );
-    }
-  );
-}
-
-// Link Discord to existing account (requires login first)
-app.post('/api/link-discord-account', checkAuth, (req, res) => {
-  if (!req.session.pendingDiscordAuth) {
-    return res.status(400).json({ error: 'No pending Discord authentication' });
-  }
-
-  const { discordId, discordUsername, discordEmail, discordAvatar } = req.session.pendingDiscordAuth;
-  const userId = req.session.userId;
-
-  db.run(
-    `INSERT OR REPLACE INTO user_discord_accounts (user_id, discord_id, discord_username, discord_email, discord_avatar) VALUES (?, ?, ?, ?, ?)`,
-    [userId, discordId, discordUsername, discordEmail, discordAvatar || ''],
-    (err) => {
-      if (err) {
-        console.error('[Discord Auth] Failed to link account:', err);
-        return res.status(500).json({ error: err.message });
-      }
-
-      delete req.session.pendingDiscordAuth;
-      console.log(`[Discord Auth] Linked Discord account ${discordUsername} to user ${userId}`);
-      res.json({ success: true, message: 'Discord account linked successfully' });
-    }
-  );
-});
-
-// Unlink Discord account
-app.post('/api/unlink-discord-account', checkAuth, (req, res) => {
-  const userId = req.session.userId;
-
-  db.run(`DELETE FROM user_discord_accounts WHERE user_id = ?`, [userId], (err) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    console.log(`[Discord Auth] Unlinked Discord account from user ${userId}`);
-    res.json({ success: true, message: 'Discord account unlinked' });
-  });
-});
-
-// Get Discord account info
-app.get('/api/discord-account-info', checkAuth, (req, res) => {
-  const userId = req.session.userId;
-
-  db.get(
-    `SELECT discord_id, discord_username, discord_email, discord_avatar, connected_at FROM user_discord_accounts WHERE user_id = ?`,
-    [userId],
-    (err, account) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      // Return null if no Discord account linked, or the account object if linked
-      if (!account) {
-        return res.json(null);
-      }
-      res.json(account);
-    }
-  );
-});
-
 // ============= OS TEMPLATES =============
 
 app.get('/api/os-templates', (req, res) => {
@@ -5542,9 +5213,6 @@ app.put('/api/settings', checkAuth, checkAdmin, (req, res) => {
   });
 });
 
-// ============= DISCORD SETTINGS API =============
-
-// Get Discord settings (admin only)
 // ============= OAUTH PROVIDER SETTINGS (Google / Discord / GitHub) =============
 
 const OAUTH_PROVIDER_IDS = ['google', 'discord', 'github'];
@@ -5599,6 +5267,37 @@ app.get('/api/oauth/providers', async (req, res) => {
 
 app.get('/api/admin/oauth-providers', checkAuth, checkAdmin, async (req, res) => {
   try {
+    // Discord's old dedicated form wrote a separate `discord_settings` table.
+    // That form is gone, so fold any surviving row into the generic table the
+    // first time this page is opened -- otherwise a working configuration would
+    // look empty and have to be re-entered by hand.
+    try {
+      const legacy = await hkvmV3Context.db.get(
+        `SELECT enabled, client_id, client_secret, redirect_uri FROM discord_settings LIMIT 1`
+      );
+      if (legacy && legacy.client_id && legacy.client_secret) {
+        const already = await hkvmV3Context.db.get(
+          `SELECT provider FROM oauth_provider_settings WHERE provider = 'discord'`
+        );
+        if (!already) {
+          await hkvmV3Context.db.run(
+            `INSERT INTO oauth_provider_settings
+               (provider, enabled, client_id, client_secret_enc, redirect_uri, allow_signup, auto_link_verified_email, updated_at)
+             VALUES ('discord', ?, ?, ?, ?, 0, 1, CURRENT_TIMESTAMP)`,
+            [
+              Number(legacy.enabled) === 1 ? 1 : 0,
+              legacy.client_id,
+              encryptSecret(String(legacy.client_secret)),
+              legacy.redirect_uri || '',
+            ]
+          );
+          console.log('[OAuth] adopted legacy Discord settings into oauth_provider_settings');
+        }
+      }
+    } catch (e) {
+      // No legacy table, or unreadable: nothing to adopt.
+    }
+
     const rows = await hkvmV3Context.db.all(`SELECT * FROM oauth_provider_settings`);
     const byProvider = new Map(rows.map((r) => [r.provider, r]));
     const providers = OAUTH_PROVIDER_IDS.map((id) => {
@@ -5623,7 +5322,7 @@ app.get('/api/admin/oauth-providers', checkAuth, checkAdmin, async (req, res) =>
             suggestedRedirectUri: suggestedRedirect,
           };
     });
-    res.json({ providers });
+        res.json({ providers });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -5810,83 +5509,6 @@ app.post('/api/admin/users/:id/reset-2fa', checkAuth, checkAdmin, async (req, re
   }
 });
 
-app.get('/api/admin/discord-settings', checkAuth, checkAdmin, (req, res) => {
-  db.get(`SELECT * FROM discord_settings LIMIT 1`, (err, settings) => {
-    if (err) return res.status(500).json({ error: err.message });
-    
-    if (!settings) {
-      // Return default empty settings
-      return res.json({
-        enabled: 0,
-        client_id: '',
-        client_secret: '',
-        redirect_uri: '',
-        bot_token: '',
-        guild_id: '',
-        auto_role_id: '',
-        updated_at: null
-      });
-    }
-
-    // Don't send client_secret to frontend for security
-    const safe = { ...settings };
-    safe.client_secret = safe.client_secret ? '••••••••' : '';
-    safe.bot_token = safe.bot_token ? '••••••••' : '';
-    res.json(safe);
-  });
-});
-
-// Update Discord settings (admin only)
-app.put('/api/admin/discord-settings', checkAuth, checkAdmin, (req, res) => {
-  const { enabled, client_id, client_secret, redirect_uri, bot_token, guild_id, auto_role_id } = req.body;
-
-  if (!client_id || !client_secret || !redirect_uri) {
-    if (enabled) {
-      return res.status(400).json({ error: 'Client ID, Client Secret, and Redirect URI are required' });
-    }
-  }
-
-  // Get current settings to preserve secrets if not being changed
-  db.get(`SELECT * FROM discord_settings LIMIT 1`, (err, current) => {
-    if (err) return res.status(500).json({ error: err.message });
-
-    const finalClientSecret = (client_secret && client_secret !== '••••••••') ? client_secret : (current?.client_secret || '');
-    const finalBotToken = (bot_token && bot_token !== '••••••••') ? bot_token : (current?.bot_token || '');
-
-    if (current) {
-      // Update existing
-      db.run(
-        `UPDATE discord_settings SET 
-         enabled = ?, client_id = ?, client_secret = ?, redirect_uri = ?, 
-         bot_token = ?, guild_id = ?, auto_role_id = ?, updated_at = datetime('now')
-         WHERE id = ?`,
-        [enabled ? 1 : 0, client_id || '', finalClientSecret, redirect_uri || '', 
-         finalBotToken, guild_id || '', auto_role_id || '', current.id],
-        (err) => {
-          if (err) return res.status(500).json({ error: err.message });
-          
-          const response = { success: true, message: 'Discord settings updated' };
-          if (client_secret === '••••••••' || !client_secret) {
-            response.message += ' (Client Secret preserved)';
-          }
-          res.json(response);
-        }
-      );
-    } else {
-      // Insert new
-      db.run(
-        `INSERT INTO discord_settings (enabled, client_id, client_secret, redirect_uri, bot_token, guild_id, auto_role_id) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [enabled ? 1 : 0, client_id || '', finalClientSecret, redirect_uri || '', 
-         finalBotToken, guild_id || '', auto_role_id || ''],
-        (err) => {
-          if (err) return res.status(500).json({ error: err.message });
-          res.json({ success: true, message: 'Discord settings created' });
-        }
-      );
-    }
-  });
-});
 
 // ============= USER PROFILE API =============
 

@@ -177,101 +177,6 @@
             </div>
           </div>
         </div>
-        <!-- Discord Auth Enable/Disable -->
-        <div class="settings-section">
-          <div class="settings-section-header">
-            <span class="settings-section-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
-            <div><div class="settings-section-title">Discord Authentication</div></div>
-          </div>
-          <div class="settings-section-body">
-            <div class="settings-row">
-              <div class="settings-row-info">
-                <div class="settings-row-label">Enable Discord Login</div>
-                <div class="settings-row-desc">Allow users to login with their Discord account</div>
-              </div>
-              <div class="settings-row-control">
-                <label class="toggle-switch">
-                  <input type="checkbox" class="toggle-input" id="discord_enabled" onchange="updateDiscordFormState()">
-                  <div class="toggle-track"><div class="toggle-thumb"></div></div>
-                </label>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Discord OAuth Credentials -->
-        <div class="settings-section" id="discordCredsSection" style="display: none;">
-          <div class="settings-section-header">
-            <span class="settings-section-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 0-7.8 7.8 5.5 5.5 0 0 0 7.8-7.8z"/></svg></span>
-            <div><div class="settings-section-title">OAuth Credentials</div></div>
-          </div>
-          <div class="settings-section-body">
-            <div class="settings-row">
-              <div class="settings-row-info">
-                <div class="settings-row-label">Client ID</div>
-                <div class="settings-row-desc">From Discord Developer Portal</div>
-              </div>
-              <div class="settings-row-control">
-                <input type="text" class="form-control" id="discord_client_id" placeholder="Your Discord Application Client ID">
-              </div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-info">
-                <div class="settings-row-label">Client Secret</div>
-                <div class="settings-row-desc">From Discord Developer Portal (keep secure!)</div>
-              </div>
-              <div class="settings-row-control">
-                <input type="password" class="form-control" id="discord_client_secret" placeholder="Your Discord Application Client Secret">
-              </div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-info">
-                <div class="settings-row-label">Redirect URI</div>
-                <div class="settings-row-desc">OAuth2 callback URL for Discord</div>
-              </div>
-              <div class="settings-row-control">
-                <input type="text" class="form-control" id="discord_redirect_uri" placeholder="https://yourserver.com/auth/discord/callback">
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Discord Bot Settings (Optional) -->
-        <div class="settings-section" id="discordBotSection" style="display: none;">
-          <div class="settings-section-header">
-            <span class="settings-section-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
-            <div><div class="settings-section-title">Bot Settings (Optional)</div></div>
-          </div>
-          <div class="settings-section-body">
-            <div class="settings-row">
-              <div class="settings-row-info">
-                <div class="settings-row-label">Bot Token</div>
-                <div class="settings-row-desc">For automatic role assignment and server features</div>
-              </div>
-              <div class="settings-row-control">
-                <input type="password" class="form-control" id="discord_bot_token" placeholder="Your Discord Bot Token (optional)">
-              </div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-info">
-                <div class="settings-row-label">Guild ID (Server ID)</div>
-                <div class="settings-row-desc">Discord server where users will be added</div>
-              </div>
-              <div class="settings-row-control">
-                <input type="text" class="form-control" id="discord_guild_id" placeholder="Your Discord Server ID (optional)">
-              </div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-info">
-                <div class="settings-row-label">Auto Role ID</div>
-                <div class="settings-row-desc">Automatic role assigned to new members</div>
-              </div>
-              <div class="settings-row-control">
-                <input type="text" class="form-control" id="discord_auto_role_id" placeholder="Discord Role ID for auto-assignment (optional)">
-              </div>
-            </div>
-          </div>
-        </div>
 
         <!-- Help Section -->
         <div class="card">
@@ -511,7 +416,7 @@
               <div class="settings-section-title">Legal pages</div>
               <div class="settings-section-desc">
                 Shown at <a href="/privacy" target="_blank" style="color:var(--accent-primary);">/privacy</a>
-                and <a href="/terms" target="_blank" style="color:var(--accent-primary);">/terms</a>.
+                and <a href="/tos" target="_blank" style="color:var(--accent-primary);">/terms</a>.
                 Google requires the privacy URL before an OAuth app can be published.
               </div>
             </div>
@@ -550,7 +455,7 @@
 
             <div style="margin:22px 0 14px;padding-top:18px;border-top:1px solid var(--border-subtle);">
               <div style="font-size:13px;font-weight:600;">Terms of Service</div>
-              <div class="form-hint" style="margin-top:2px;">Shown at <a href="/terms" target="_blank" style="color:var(--accent-primary);">/terms</a>.</div>
+              <div class="form-hint" style="margin-top:2px;">Shown at <a href="/tos" target="_blank" style="color:var(--accent-primary);">/terms</a>.</div>
             </div>
 
             <div class="form-group">
@@ -570,7 +475,7 @@
             <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
               <button class="btn btn-primary" onclick="savePrivacySettings()">Save</button>
               <a class="btn btn-outline" href="/privacy" target="_blank">Preview /privacy</a>
-              <a class="btn btn-outline" href="/terms" target="_blank">Preview /terms</a>
+              <a class="btn btn-outline" href="/tos" target="_blank">Preview /tos</a>
             </div>
             <div style="margin-top:14px;padding:12px 14px;background:rgba(99,102,241,0.06);border-left:3px solid #6366f1;border-radius:4px;font-size:12.5px;line-height:1.6;color:var(--text-secondary);">
               The policy text describes what this panel actually stores. If you add a third-party
@@ -984,8 +889,6 @@
         }
       }
       
-      // Save Discord settings
-      await saveDiscordSettings();
       
       alert.className = 'alert alert-success';
       alert.innerHTML = `<span class="alert-icon">✅</span><span>All settings saved</span>`;
@@ -1083,94 +986,6 @@
     }
   };
 
-  // Discord Settings
-  window.loadDiscordSettings = async function() {
-    try {
-      const res = await fetch('/api/admin/discord-settings');
-      if (!res.ok) return;
-      const settings = await res.json();
-      
-      document.getElementById('discord_enabled').checked = settings.enabled ? true : false;
-      document.getElementById('discord_client_id').value = settings.client_id || '';
-      document.getElementById('discord_client_secret').value = settings.client_secret || '';
-      document.getElementById('discord_redirect_uri').value = settings.redirect_uri || '';
-      document.getElementById('discord_bot_token').value = settings.bot_token || '';
-      document.getElementById('discord_guild_id').value = settings.guild_id || '';
-      document.getElementById('discord_auto_role_id').value = settings.auto_role_id || '';
-      
-      updateDiscordFormState();
-    } catch(e) {
-      console.error('Failed to load Discord settings:', e);
-    }
-  };
-
-  window.updateDiscordFormState = function() {
-    const enabled = document.getElementById('discord_enabled').checked;
-    const credsSection = document.getElementById('discordCredsSection');
-    const botSection = document.getElementById('discordBotSection');
-    
-    if (enabled) {
-      credsSection.style.display = 'block';
-      botSection.style.display = 'block';
-    } else {
-      credsSection.style.display = 'none';
-      botSection.style.display = 'none';
-    }
-  };
-
-  window.saveDiscordSettings = async function() {
-    const enabled = document.getElementById('discord_enabled').checked;
-    const clientId = document.getElementById('discord_client_id').value;
-    const clientSecret = document.getElementById('discord_client_secret').value;
-    const redirectUri = document.getElementById('discord_redirect_uri').value;
-    const botToken = document.getElementById('discord_bot_token').value;
-    const guildId = document.getElementById('discord_guild_id').value;
-    const autoRoleId = document.getElementById('discord_auto_role_id').value;
-    
-    if (enabled && (!clientId || !clientSecret || !redirectUri)) {
-      throw new Error('Client ID, Client Secret, and Redirect URI are required when Discord auth is enabled');
-    }
-
-    const alert = document.getElementById('settingsAlert');
-    try {
-      const res = await fetch('/api/admin/discord-settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          enabled,
-          client_id: clientId,
-          client_secret: clientSecret,
-          redirect_uri: redirectUri,
-          bot_token: botToken,
-          guild_id: guildId,
-          auto_role_id: autoRoleId
-        })
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        alert.className = 'alert alert-success';
-        alert.innerHTML = `<span class="alert-icon">✅</span><span>Discord settings saved</span>`;
-        alert.style.display = 'flex';
-        if (window.showToast) showToast('Discord settings saved', 'success');
-      } else {
-        throw new Error(data.error || 'Failed to save Discord settings');
-      }
-    } catch(e) {
-      alert.className = 'alert alert-error';
-      alert.innerHTML = `<span class="alert-icon">❌</span><span>${e.message}</span>`;
-      alert.style.display = 'flex';
-      if (window.showToast) showToast('Error: ' + e.message, 'error');
-    }
-    setTimeout(() => alert.style.display = 'none', 4000);
-  };
-
-  // Load Discord settings on page load
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', loadDiscordSettings);
-  } else {
-    loadDiscordSettings();
-  }
 
   // Modal helpers - FIXED to use correct classes
   if (!window.openModal) {

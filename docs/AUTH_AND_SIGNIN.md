@@ -131,12 +131,12 @@ https://your-panel-domain.com/privacy
 ```
 
 Google's consent screen also has a **Terms of Service** field. The panel serves one at
-`/terms`, written against what the panel actually does — virtual machines, containers,
+`/tos`, written against what the panel actually does — virtual machines, containers,
 storage, networking, reselling — so it does not promise domains or shared hosting the
 way most templates do. Fill in the same operator details on that tab and use:
 
 ```
-https://your-panel-domain.com/terms
+https://your-panel-domain.com/tos
 ```
 
 Both pages are public and require no login.
@@ -197,27 +197,27 @@ enabled or a credential is missing.
 
 ## 5. Add Discord sign-in
 
+Same as Google, with one fewer step — Discord has no consent-screen to publish.
+
 1. Go to <https://discord.com/developers/applications> → **New Application**.
 2. **OAuth2** in the left sidebar.
 3. Copy **Client ID** and **Client Secret** (`Reset Secret` if it's hidden).
-4. Under **Redirects**, add:
+4. Under **Redirects**, add exactly:
 
    ```
    https://your-panel-domain.com/auth/discord/callback
    ```
 
-5. Paste the credentials into **Admin → Settings → Sign-in → Discord Authentication**.
-   It is a **separate section** from the *Social sign-in* cards above — tick
-   **Enable Discord Login**, fill in Client ID, Client Secret and the redirect
-   URI, then Save.
+5. Paste the credentials into **Admin → Settings → Sign-in → Discord** and enable.
 
-> **Discord has two settings sections; use the right one.** The *Social sign-in*
-> cards cover Google, Discord and GitHub together. Discord also has its own
-> dedicated section lower on the same tab, which is the one that reveals the
-> **Login with Discord** button. Configuring either one works — the panel reads
-> both — but the dedicated section is the complete form (it also carries the
-> redirect URI and bot options). Don't fill in both; you'd have two disagreeing
-> records.
+> **There used to be two Discord sections.** One generic card and one dedicated
+> "Discord Authentication" form, writing different database tables. Configuring
+> either produced a login button that failed with *"Discord authentication setup
+> incomplete"*, because the button called a third code path that read the other
+> table. All three are now one: a single **Discord** card, one `/auth/discord`
+> route, same as Google and GitHub. If you configured Discord before this change,
+> your credentials are migrated automatically the first time you open
+> **Settings → Sign-in** — nothing to retype.
 
 Discord returns a verified email only for accounts that confirmed it. If
 someone's Discord email isn't verified, the panel will not silently attach their

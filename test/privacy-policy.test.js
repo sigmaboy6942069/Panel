@@ -89,7 +89,7 @@ function render(data) {
 
   await check('with no custom terms URL the footer falls back to the built-in page', async () => {
     const html = await render({});
-    assert.match(html, /href="\/terms"/, 'no route to the terms page');
+    assert.match(html, /href="\/tos"/, 'no route to the terms page');
     assert.ok(!html.includes('href=""'), 'rendered an empty link');
   });
 
