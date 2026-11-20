@@ -508,10 +508,11 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             </span>
             <div>
-              <div class="settings-section-title">Privacy policy</div>
+              <div class="settings-section-title">Legal pages</div>
               <div class="settings-section-desc">
-                Shown at <a href="/privacy" target="_blank" style="color:var(--accent-primary);">/privacy</a>.
-                Google requires this URL before an OAuth app can be published.
+                Shown at <a href="/privacy" target="_blank" style="color:var(--accent-primary);">/privacy</a>
+                and <a href="/terms" target="_blank" style="color:var(--accent-primary);">/terms</a>.
+                Google requires the privacy URL before an OAuth app can be published.
               </div>
             </div>
           </div>
@@ -527,6 +528,11 @@
               <div class="form-hint">Required for a policy you can actually publish. Google reviewers look for a reachable contact.</div>
             </div>
             <div class="form-group">
+              <label class="form-label">Abuse report email <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+              <input type="email" class="form-control" id="privacyAbuseEmail" placeholder="abuse@your-domain.com">
+              <div class="form-hint">Shown on the terms page for reporting unlawful content. Falls back to the privacy contact.</div>
+            </div>
+            <div class="form-group">
               <label class="form-label">Postal address <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
               <input type="text" class="form-control" id="privacyContactAddress" placeholder="Street, city, country">
               <div class="form-hint">Needed in the EU/UK. If you operate from the EU, put your real business address here.</div>
@@ -536,14 +542,35 @@
               <input type="text" class="form-control" id="privacyUpdatedAt" placeholder="e.g. 10 November 2026">
               <div class="form-hint">Free text, shown at the top of the page. Bump it whenever you change the policy.</div>
             </div>
-            <div class="form-group" style="margin-bottom:0;">
+            <div class="form-group">
               <label class="form-label">Link to your Terms of Service <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
-              <input type="url" class="form-control" id="privacyTermsUrl" placeholder="https://your-domain.com/terms">
-              <div class="form-hint">Adds a link in the page footer. Leave blank to hide it.</div>
+              <input type="url" class="form-control" id="privacyTermsUrl" placeholder="Leave blank to use the built-in /terms page">
+              <div class="form-hint">Adds a link in the privacy page footer. Blank is fine &mdash; the panel serves its own terms at /terms.</div>
+            </div>
+
+            <div style="margin:22px 0 14px;padding-top:18px;border-top:1px solid var(--border-subtle);">
+              <div style="font-size:13px;font-weight:600;">Terms of Service</div>
+              <div class="form-hint" style="margin-top:2px;">Shown at <a href="/terms" target="_blank" style="color:var(--accent-primary);">/terms</a>.</div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Terms last updated</label>
+              <input type="text" class="form-control" id="termsUpdatedAt" placeholder="e.g. 10 November 2026">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Governing law</label>
+              <input type="text" class="form-control" id="termsGoverningLaw" placeholder="e.g. Belgium, the Netherlands, England and Wales">
+              <div class="form-hint">The country or jurisdiction whose law applies. Consumers keep the protection of their own country's mandatory rules regardless.</div>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Consumer arbitration statement</label>
+              <input type="text" class="form-control" id="termsDisputeStatement" placeholder="Leave blank unless you are required to offer arbitration">
+              <div class="form-hint">Most small operators are not obliged to take part in consumer arbitration. Leave blank and the page says so.</div>
             </div>
             <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
               <button class="btn btn-primary" onclick="savePrivacySettings()">Save</button>
               <a class="btn btn-outline" href="/privacy" target="_blank">Preview /privacy</a>
+              <a class="btn btn-outline" href="/terms" target="_blank">Preview /terms</a>
             </div>
             <div style="margin-top:14px;padding:12px 14px;background:rgba(99,102,241,0.06);border-left:3px solid #6366f1;border-radius:4px;font-size:12.5px;line-height:1.6;color:var(--text-secondary);">
               The policy text describes what this panel actually stores. If you add a third-party
@@ -645,6 +672,10 @@
       set('privacyContactAddress', 'privacy_contact_address');
       set('privacyUpdatedAt', 'privacy_updated_at');
       set('privacyTermsUrl', 'privacy_terms_url');
+      set('privacyAbuseEmail', 'privacy_abuse_email');
+      set('termsUpdatedAt', 'terms_updated_at');
+      set('termsGoverningLaw', 'terms_governing_law');
+      set('termsDisputeStatement', 'terms_dispute_statement');
     } catch (e) {
       console.error('Failed to load privacy settings:', e);
     }
@@ -677,6 +708,10 @@
           privacy_contact_address: val('privacyContactAddress'),
           privacy_updated_at: val('privacyUpdatedAt'),
           privacy_terms_url: terms,
+          privacy_abuse_email: val('privacyAbuseEmail'),
+          terms_updated_at: val('termsUpdatedAt'),
+          terms_governing_law: val('termsGoverningLaw'),
+          terms_dispute_statement: val('termsDisputeStatement'),
         }),
       });
       const d = await res.json().catch(() => ({}));

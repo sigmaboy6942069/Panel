@@ -130,6 +130,17 @@ Then open `/privacy` and check it reads correctly with your details in it.
 https://your-panel-domain.com/privacy
 ```
 
+Google's consent screen also has a **Terms of Service** field. The panel serves one at
+`/terms`, written against what the panel actually does — virtual machines, containers,
+storage, networking, reselling — so it does not promise domains or shared hosting the
+way most templates do. Fill in the same operator details on that tab and use:
+
+```
+https://your-panel-domain.com/terms
+```
+
+Both pages are public and require no login.
+
 Anything you add later — analytics, a payment processor, an email sender — belongs
 in the "Who data is shared with" section too. The template is
 `views/pages/privacy.ejs`; it is plain HTML you can edit in place.

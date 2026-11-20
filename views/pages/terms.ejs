@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0f">
+  <title>Terms of Service · <%= siteName %></title>
+  <link rel="icon" href="<%= siteLogo %>" type="image/png">
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --border: rgba(255, 255, 255, 0.09);
+      --text: #e6e6ef;
+      --muted: #9a9aad;
+      --accent: #6366f1;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+    .wrap { max-width: 800px; margin: 0 auto; padding: 56px 24px 96px; }
+    header { margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+    header .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: var(--muted); margin-bottom: 18px; text-decoration: none;
+    }
+    header .brand img { width: 22px; height: 22px; border-radius: 5px; }
+    h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: -0.4px; }
+    .updated { font-size: 13px; color: var(--muted); }
+    h2 {
+      font-size: 18px; margin: 38px 0 10px; padding-top: 20px;
+      border-top: 1px solid var(--border); letter-spacing: -0.2px;
+    }
+    h2:first-of-type { border-top: none; padding-top: 0; }
+    p, li { color: #cfcfdd; }
+    ul, ol { padding-left: 22px; }
+    li { margin-bottom: 7px; }
+    a { color: #8b8dfa; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13.5px; }
+    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    code {
+      background: rgba(255,255,255,0.07); padding: 1px 6px; border-radius: 4px;
+      font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .note {
+      background: rgba(99, 102, 241, 0.08); border-left: 3px solid var(--accent);
+      padding: 14px 16px; border-radius: 6px; margin: 18px 0; font-size: 14px;
+    }
+    .warn {
+      background: rgba(245, 158, 11, 0.08); border-left: 3px solid #f59e0b;
+      padding: 14px 16px; border-radius: 6px; margin: 18px 0; font-size: 14px;
+    }
+    .banned { border: 1px solid rgba(239,68,68,0.25); border-radius: 8px; padding: 4px 18px 10px; margin: 14px 0; }
+    .banned h3 { color: #ef8b8b; font-size: 14px; margin: 14px 0 6px; }
+    footer {
+      margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--border);
+      font-size: 12.5px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap;
+    }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <a class="brand" href="/login">
+      <img src="<%= siteLogo %>" alt="">
+      <span><%= siteName %></span>
+    </a>
+    <h1>Terms of Service</h1>
+    <div class="updated">
+      Last updated: <%= updated %>
+      <% if (companyName) { %> · Operated by <%= companyName %><% } %>
+    </div>
+  </header>
+
+  <p>
+    These terms govern your use of <strong><%= siteName %></strong> and the virtual
+    machines, containers and related services provided through it. By creating an
+    account, placing an order, or using a service, you agree to them.
+  </p>
+  <p>
+    Read them together with the <a href="/privacy">Privacy Policy</a>, which explains
+    what data is collected and why.
+  </p>
+
+  <% if (!companyName) { %>
+  <div class="warn">
+    The operator of this panel has not configured their business details yet.
+    They must be set before these terms are shown to customers —
+    <strong>Admin &rarr; Settings &rarr; Privacy</strong>.
+  </div>
+  <% } %>
+
+  <h2>1. Who you are contracting with</h2>
+  <ul>
+    <li><strong>Operator:</strong> <%= companyName || siteName %></li>
+    <% if (contactAddress) { %><li><strong>Address:</strong> <%= contactAddress %></li><% } %>
+    <% if (contactEmail) { %><li><strong>Contact:</strong> <a href="mailto:<%= contactEmail %>"><%= contactEmail %></a></li><% } %>
+    <% if (abuseEmail) { %><li><strong>Abuse reports:</strong> <a href="mailto:<%= abuseEmail %>"><%= abuseEmail %></a></li><% } %>
+  </ul>
+  <p>
+    If you are a consumer, you are the natural person acting for purposes outside your
+    trade or profession. If you are acting for a business, you confirm you are authorised
+    to bind it to these terms.
+  </p>
+
+  <h2>2. Your account</h2>
+  <ul>
+    <li>You must give accurate details and keep them current.</li>
+    <li>You are responsible for everything done through your account. Keep your password
+      and any two-factor device secure, and tell the operator immediately if you believe
+      someone else has access.</li>
+    <li>One account per person or organisation. Accounts are not transferable without
+      the operator's agreement.</li>
+    <li>You must be old enough to enter a binding contract where you live. If you are a
+      minor, you need a guardian's consent.</li>
+    <li>The operator may suspend or close an account for a serious breach of these terms,
+      for non-payment, or where required by law. Where it is reasonable to do so, you will
+      be told why and given a chance to put things right.</li>
+  </ul>
+
+  <h2>3. What is provided</h2>
+  <p>
+    The panel lets you create and manage virtual machines and containers on
+    QEMU/KVM hosts, together with the surrounding infrastructure:
+  </p>
+  <table>
+    <tr><th>Capability</th><th>What it means</th></tr>
+    <tr><td>Virtual machines</td><td>KVM instances with configurable CPU, memory, disk and networking</td></tr>
+    <tr><td>Containers</td><td>LXC containers from the available templates</td></tr>
+    <tr><td>Storage</td><td>Volumes, snapshots and scheduled backups</td></tr>
+    <tr><td>Networking</td><td>IP allocations, port forwarding and firewall rules</td></tr>
+    <tr><td>Monitoring</td><td>Resource metrics and alert rules</td></tr>
+    <tr><td>Multiple nodes</td><td>Machines spread across connected compute nodes</td></tr>
+    <tr><td>Reselling</td><td>Where enabled, offering services to your own customers</td></tr>
+  </table>
+  <p>
+    Availability of any particular template, operating system image or feature depends on
+    what the operator has configured. The operator may change or withdraw features, and
+    will give reasonable notice where a change materially affects a paid service.
+  </p>
+  <p>
+    <strong>The operator supplies infrastructure, not content.</strong> What runs inside
+    your machines is yours to install, configure, secure and support.
+  </p>
+
+  <h2>4. Prices, billing and renewal</h2>
+  <ul>
+    <li>Prices are shown before you order and are in the currency displayed at checkout.</li>
+    <li>Services run for the period you selected. Unless you cancel before it ends, a
+      service may renew for a further period and the price for that period will be charged.</li>
+    <li>Invoices and receipts are available in the panel. Keep your billing details current.</li>
+    <li>If a payment fails, the operator may suspend the affected service after giving
+      notice. Reactivation may depend on payment of the outstanding amount.</li>
+    <li>Account credit is generally not refundable in cash, except where the law requires
+      it.</li>
+    <li>Prices may change with reasonable notice. If you are a consumer and do not accept
+      a change that affects a service you already pay for, you may cancel it.</li>
+  </ul>
+
+  <h2>5. Cancellation and refunds</h2>
+  <ul>
+    <li>You can cancel a service from the panel at any time; it runs until the end of the
+      period you have already paid for.</li>
+    <li>Deleting a service destroys its data. Take a backup first — deletion cannot be
+      undone.</li>
+    <li><strong>Consumers in the EU/UK have a right of withdrawal</strong> for distance
+      contracts. For digital services it ends early once performance has begun with your
+      express consent and your acknowledgement that you lose that right. Because a virtual
+      machine is provisioned within minutes of ordering, that is normally the case. Ask the
+      operator before ordering if you are unsure.</li>
+    <li>Where a statutory refund right applies, it is not affected by anything in these terms.</li>
+  </ul>
+
+  <h2>6. Acceptable use</h2>
+  <p>
+    Use a service only for lawful purposes and in a way that does not damage the service,
+    the operator's infrastructure, or anyone else's systems. This section applies to you
+    and to anyone you allow to use your services.
+  </p>
+
+  <div class="banned">
+    <h3>Never, on any service</h3>
+    <ul>
+      <li><strong>Illegal content</strong> — including material that sexualises minors,
+        incites violence or hatred, or promotes terrorism or extremism.</li>
+      <li><strong>Infringement</strong> — distributing copyrighted works you have no right
+        to, or violating trademarks or other rights.</li>
+      <li><strong>Fraud and deception</strong> — phishing, scams, identity theft, forged
+        documents, or fake payment instruments.</li>
+      <li><strong>Malware</strong> — viruses, trojans, ransomware, botnet controllers or
+        command-and-control infrastructure.</li>
+      <li><strong>Attacks on others</strong> — denial-of-service, port scanning, brute
+        forcing, unauthorised access to systems you do not own.</li>
+      <li><strong>Spam</strong> — unsolicited bulk email, open mail relays, or services
+        built to bypass spam filters.</li>
+      <li><strong>Cryptocurrency mining</strong> — mining coins is not permitted, and neither
+        is any comparable workload that exists only to consume CPU or GPU cycles for coin
+        generation.</li>
+      <li><strong>Sanctions violations</strong> — use by, for, or on behalf of anyone on an
+        applicable sanctions list, or in an embargoed territory.</li>
+    </ul>
+  </div>
+
+  <p>
+    High-risk activity — unlicensed gambling or financial services, anonymising proxies
+    used to conceal unlawful activity, or anything that endangers network stability —
+    needs the operator's written agreement first. Ask; do not assume.
+  </p>
+
+  <h2>7. Security and your responsibilities</h2>
+  <ul>
+    <li>Keep your machines patched. You have administrative control, so you own their
+      security.</li>
+    <li>Do not endanger the network, the shared hardware, or other customers' services
+      through excessive load or misconfiguration.</li>
+    <li>Take your own backups unless a backup service is explicitly part of what you
+      bought. Scheduled backups inside the panel are a convenience, not a guarantee.</li>
+    <li>Where you resell services, you must bind your own customers to terms at least as
+      protective as these, and you remain responsible to the operator for their conduct.</li>
+  </ul>
+
+  <h2>8. Suspension and termination</h2>
+  <p>
+    If these terms are broken, the operator may, in proportion to the seriousness of the
+    problem: warn you and ask you to fix it; remove or block specific content; suspend the
+    affected service; or terminate the contract for serious breach. Where the breach
+    endangers infrastructure or involves clearly unlawful content, a service may be
+    suspended without prior notice. Information may be disclosed to authorities where the
+    law requires it.
+  </p>
+  <p>
+    You may close your account at any time, provided no services are active and no amount
+    is outstanding. Deleting an account removes your services and their data.
+  </p>
+
+  <h2>9. Abuse reports</h2>
+  <p>
+    <% if (abuseEmail) { %>
+      Report abuse or unlawful content to
+      <a href="mailto:<%= abuseEmail %>"><%= abuseEmail %></a>.
+    <% } else { %>
+      Report abuse or unlawful content to the operator using the contact address above.
+    <% } %>
+    Reports should identify the service and the specific problem. The operator will review
+    them and act where warranted, and will inform the parties concerned of the outcome
+    where it lawfully can.
+  </p>
+
+  <h2>10. Data protection</h2>
+  <p>
+    The operator processes personal data as described in the
+    <a href="/privacy">Privacy Policy</a>. Where you store other people's personal data on
+    your machines, you are the controller of that data and the operator acts on your
+    instructions. Ask the operator if you need a data processing agreement under
+    Article 28 GDPR.
+  </p>
+
+  <h2>11. Liability</h2>
+  <ul>
+    <li>Liability is unlimited for death or personal injury, for intentional wrongdoing,
+      for gross negligence, and for anything else the law does not allow to be limited.</li>
+    <li>For ordinary negligence, the operator is liable only for breach of a core
+      contractual duty, and then only for loss that is typical and foreseeable for this
+      kind of service.</li>
+    <li>Beyond that, liability for ordinary negligence is excluded.</li>
+    <li>Liability under mandatory product liability law, or under an expressly given
+      guarantee, is unaffected.</li>
+    <li>The operator is not liable for outages caused by events outside their control,
+      including force majeure, upstream provider failures, or attacks on the network.</li>
+    <li>You are responsible for the content you publish. The operator does not review it
+      in advance and takes no responsibility for it.</li>
+  </ul>
+  <div class="note">
+    <strong>Back up your data.</strong> No hosting service can guarantee against disk
+    failure or operator error. Keep your own copies of anything you cannot afford to lose.
+  </div>
+
+  <h2>12. Changes to these terms</h2>
+  <p>
+    These terms may be updated when the law changes or the service does. Material changes
+    will be announced in the panel in reasonable time before they take effect. If you do
+    not accept a change, you may cancel the affected service before it applies. Continuing
+    to use the service afterwards means you accept the new version.
+  </p>
+
+  <h2>13. Governing law and disputes</h2>
+  <p>
+    These terms are governed by the law of <%= governingLaw %>. If you are a consumer,
+    this choice does not remove the protection of mandatory rules in the country where you
+    live, and you may bring proceedings in your local courts.
+  </p>
+  <p>
+    If the operator is not willing or obliged to take part in consumer arbitration
+    proceedings, that is stated here: <strong><%= disputeStatement %></strong>.
+  </p>
+  <p>
+    If any part of these terms turns out to be unenforceable, the rest continues to apply.
+  </p>
+
+  <h2>14. Contact</h2>
+  <p>
+    <% if (contactEmail) { %>
+      Questions about these terms:
+      <a href="mailto:<%= contactEmail %>"><%= contactEmail %></a>.
+    <% } else { %>
+      Questions about these terms should be addressed to the operator of this panel.
+    <% } %>
+  </p>
+
+  <footer>
+    <a href="/login">&larr; Back to sign in</a>
+    <a href="/privacy">Privacy Policy</a>
+    <span><%= siteName %> <%= panelVersion %></span>
+  </footer>
+
+</div>
+</body>
+</html>

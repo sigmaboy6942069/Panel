@@ -304,7 +304,7 @@
 
   <footer>
     <a href="/login">&larr; Back to sign in</a>
-    <% if (termsUrl) { %><a href="<%= termsUrl %>">Terms of Service</a><% } %>
+    <a href="<%= termsUrl || '/terms' %>">Terms of Service</a>
     <span><%= siteName %> <%= panelVersion %></span>
   </footer>
 

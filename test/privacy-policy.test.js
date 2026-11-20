@@ -87,9 +87,15 @@ function render(data) {
     assert.ok(!html.includes('No privacy contact address has been configured'));
   });
 
-  await check('the legal footer link is hidden when no terms URL is set', async () => {
+  await check('with no custom terms URL the footer falls back to the built-in page', async () => {
     const html = await render({});
-    assert.ok(!html.includes('>Terms of Service<'), 'a dead Terms link was rendered');
+    assert.match(html, /href="\/terms"/, 'no route to the terms page');
+    assert.ok(!html.includes('href=""'), 'rendered an empty link');
+  });
+
+  await check('a custom terms URL overrides the built-in page', async () => {
+    const html = await render({ termsUrl: 'https://example.com/my-terms' });
+    assert.match(html, /href="https:\/\/example\.com\/my-terms"/);
   });
 
   // ---------- it must be truthful about this panel ----------
