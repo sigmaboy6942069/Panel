@@ -114,6 +114,10 @@
           </svg>
           Sign-in
         </button>
+        <button class="tab-btn" onclick="switchTab('privacy')" style="display: flex; align-items: center; gap: 6px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Privacy
+        </button>
         <button class="tab-btn" onclick="switchTab('about')" style="display: flex; align-items: center; gap: 6px;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
           About
@@ -496,6 +500,61 @@
         </div>
       </div>
 
+      <!-- PRIVACY TAB: details shown on the public /privacy page -->
+      <div class="tab-pane" id="tab-privacy">
+        <div class="settings-section">
+          <div class="settings-section-header">
+            <span class="settings-section-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </span>
+            <div>
+              <div class="settings-section-title">Privacy policy</div>
+              <div class="settings-section-desc">
+                Shown at <a href="/privacy" target="_blank" style="color:var(--accent-primary);">/privacy</a>.
+                Google requires this URL before an OAuth app can be published.
+              </div>
+            </div>
+          </div>
+          <div class="settings-section-body">
+            <div class="form-group">
+              <label class="form-label">Operator / company name</label>
+              <input type="text" class="form-control" id="privacyCompanyName" placeholder="e.g. Example Hosting, or your own name if you operate this personally">
+              <div class="form-hint">Who is legally responsible for the data. Leave blank to show the panel name (<%= siteName %>).</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Privacy contact email</label>
+              <input type="email" class="form-control" id="privacyContactEmail" placeholder="privacy@your-domain.com">
+              <div class="form-hint">Required for a policy you can actually publish. Google reviewers look for a reachable contact.</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Postal address <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+              <input type="text" class="form-control" id="privacyContactAddress" placeholder="Street, city, country">
+              <div class="form-hint">Needed in the EU/UK. If you operate from the EU, put your real business address here.</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Last updated</label>
+              <input type="text" class="form-control" id="privacyUpdatedAt" placeholder="e.g. 10 November 2026">
+              <div class="form-hint">Free text, shown at the top of the page. Bump it whenever you change the policy.</div>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Link to your Terms of Service <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+              <input type="url" class="form-control" id="privacyTermsUrl" placeholder="https://your-domain.com/terms">
+              <div class="form-hint">Adds a link in the page footer. Leave blank to hide it.</div>
+            </div>
+            <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-primary" onclick="savePrivacySettings()">Save</button>
+              <a class="btn btn-outline" href="/privacy" target="_blank">Preview /privacy</a>
+            </div>
+            <div style="margin-top:14px;padding:12px 14px;background:rgba(99,102,241,0.06);border-left:3px solid #6366f1;border-radius:4px;font-size:12.5px;line-height:1.6;color:var(--text-secondary);">
+              The policy text describes what this panel actually stores. If you add a third-party
+              service (analytics, a payment provider, an email sender), add it to the
+              <strong>&ldquo;who data is shared with&rdquo;</strong> section too &mdash; the page is a
+              template at <code style="font-size:12px;">views/pages/privacy.ejs</code>.
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ABOUT TAB with svg dynamic -->
       <div class="tab-pane" id="tab-about">
         <div class="card">
@@ -544,7 +603,7 @@
 (function() {
   // Tab switching logic - FIXED
   window.switchTab = function(tab) {
-    const tabs = ['general', 'branding', 'security', 'system', 'signin', 'about'];
+    const tabs = ['general', 'branding', 'security', 'system', 'signin', 'privacy', 'about'];
     
     // Update all tab buttons
     document.querySelectorAll('.tab-btn').forEach((btn, idx) => {
@@ -560,6 +619,7 @@
     // Load tab-specific data
     if (tab === 'system') loadSystemStats();
     if (tab === 'signin') { loadOAuthProviders(); loadTwoFaPolicy(); }
+    if (tab === 'privacy') loadPrivacySettings();
   };
 
   // Get icon URL inputs - consolidated
@@ -567,6 +627,67 @@
     // Use the Branding tab input with unique ID
     return document.getElementById('setting_site_icon_url_branding') || document.getElementById('setting_site_icon_url');
   }
+
+  // ---------- Privacy policy details ----------
+  // These are the operator fields interpolated into views/pages/privacy.ejs.
+  // Kept out of the general settings form because they are free text, not
+  // normalised values, and only matter for the public page.
+  async function loadPrivacySettings() {
+    try {
+      const res = await fetch('/api/settings');
+      const d = await res.json();
+      const set = (id, key) => {
+        const el = document.getElementById(id);
+        if (el) el.value = d[key] || '';
+      };
+      set('privacyCompanyName', 'privacy_company_name');
+      set('privacyContactEmail', 'privacy_contact_email');
+      set('privacyContactAddress', 'privacy_contact_address');
+      set('privacyUpdatedAt', 'privacy_updated_at');
+      set('privacyTermsUrl', 'privacy_terms_url');
+    } catch (e) {
+      console.error('Failed to load privacy settings:', e);
+    }
+  }
+
+  window.loadPrivacySettings = loadPrivacySettings;
+
+  window.savePrivacySettings = async function () {
+    const val = (id) => (document.getElementById(id)?.value || '').trim();
+    const email = val('privacyContactEmail');
+    const terms = val('privacyTermsUrl');
+
+    // Catch the two mistakes that make a published policy look unfinished.
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      alert('That privacy contact email does not look like an address.');
+      return;
+    }
+    if (terms && !/^https?:\/\//i.test(terms)) {
+      alert('The Terms link must start with http:// or https://');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          privacy_company_name: val('privacyCompanyName'),
+          privacy_contact_email: email,
+          privacy_contact_address: val('privacyContactAddress'),
+          privacy_updated_at: val('privacyUpdatedAt'),
+          privacy_terms_url: terms,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || d.success === false) throw new Error(d.error || 'Save failed');
+      if (window.hkvmToast) hkvmToast('Privacy details saved', 'success');
+      else alert('Privacy details saved');
+    } catch (e) {
+      if (window.hkvmToast) hkvmToast(e.message, 'error');
+      else alert('Could not save: ' + e.message);
+    }
+  };
 
   // ---------- Social sign-in providers ----------
   const PROVIDER_META = {

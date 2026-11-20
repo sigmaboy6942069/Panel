@@ -382,6 +382,10 @@
       <%= siteName %> <%= panelVersion %> · &copy; <%= new Date().getFullYear() %> ShadowGamerIND
       <br>
       <span style="font-size: 10px; color: var(--text-muted);">Powered by QEMU/KVM + Express.js</span>
+      <br>
+      <span style="font-size: 10px; margin-top: 4px; display: inline-block;">
+        <a href="/privacy" style="color: var(--text-muted); text-decoration: underline;">Privacy Policy</a>
+      </span>
     </div>
 
   </div>
@@ -545,17 +549,18 @@ async function loadOAuthProviders() {
       github.style.display = 'flex';
     }
 
-    // The legacy Discord button is driven by its own settings row. If the new
-    // table says Discord is on, reveal it here too so both stay in step.
-    if (providers.includes('discord')) {
-      const legacyLoaded = await fetch('/api/discord-enabled').then((r) => r.json()).catch(() => null);
-      const btn = document.getElementById('discordLoginBtn');
-      if (btn && legacyLoaded && legacyLoaded.enabled) {
-        btn.style.display = 'flex';
-        btn.style.alignItems = 'center';
-        btn.style.justifyContent = 'center';
-        btn.style.gap = '8px';
+    // Discord is revealed by whichever settings form was filled in. Requiring
+    // both sources to agree is what used to hide the button on a perfectly
+    // valid configuration, so either one is enough -- the /auth/discord route
+    // accepts both too.
+    const discordBtn = document.getElementById('discordLoginBtn');
+    if (discordBtn) {
+      let discordOn = providers.includes('discord');
+      if (!discordOn) {
+        const legacy = await fetch('/api/discord-enabled').then((r) => r.json()).catch(() => null);
+        discordOn = Boolean(legacy && legacy.enabled);
       }
+      if (discordOn) showDiscordButton(discordBtn);
     }
   } catch (e) {
     // Login must still work with no providers configured.
@@ -563,21 +568,25 @@ async function loadOAuthProviders() {
 }
 loadOAuthProviders();
 
+// Single place that reveals the Discord button, so the styling can't drift
+// between the two loaders below.
+function showDiscordButton(btn) {
+  if (!btn) return;
+  btn.style.display = 'flex';
+  btn.style.alignItems = 'center';
+  btn.style.justifyContent = 'center';
+  btn.style.gap = '8px';
+}
+
 // Check if Discord auth is enabled and show Discord button
 async function loadDiscordSettings() {
   try {
     const res = await fetch('/api/discord-enabled');
     if (!res.ok) return;
     const settings = await res.json();
-    
+
     if (settings.enabled) {
-      const discordBtn = document.getElementById('discordLoginBtn');
-      if (discordBtn) {
-        discordBtn.style.display = 'flex';
-        discordBtn.style.alignItems = 'center';
-        discordBtn.style.justifyContent = 'center';
-        discordBtn.style.gap = '8px';
-      }
+      showDiscordButton(document.getElementById('discordLoginBtn'));
     }
   } catch(e) {
     console.error('Failed to load Discord settings:', e);

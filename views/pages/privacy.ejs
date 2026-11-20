@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0f">
+  <title>Privacy Policy · <%= siteName %></title>
+  <link rel="icon" href="<%= siteLogo %>" type="image/png">
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --panel: #12121a;
+      --border: rgba(255, 255, 255, 0.09);
+      --text: #e6e6ef;
+      --muted: #9a9aad;
+      --accent: #6366f1;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+    .wrap { max-width: 800px; margin: 0 auto; padding: 56px 24px 96px; }
+    header { margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+    header .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: var(--muted); margin-bottom: 18px; text-decoration: none;
+    }
+    header .brand img { width: 22px; height: 22px; border-radius: 5px; }
+    h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: -0.4px; }
+    .updated { font-size: 13px; color: var(--muted); }
+    h2 {
+      font-size: 19px; margin: 42px 0 12px; padding-top: 20px;
+      border-top: 1px solid var(--border); letter-spacing: -0.2px;
+    }
+    h2:first-of-type { border-top: none; padding-top: 0; }
+    h3 { font-size: 15px; margin: 24px 0 8px; color: var(--text); }
+    p, li { color: #cfcfdd; }
+    ul { padding-left: 22px; }
+    li { margin-bottom: 6px; }
+    a { color: #8b8dfa; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13.5px; }
+    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    code {
+      background: rgba(255,255,255,0.07); padding: 1px 6px; border-radius: 4px;
+      font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .note {
+      background: rgba(99, 102, 241, 0.08); border-left: 3px solid var(--accent);
+      padding: 14px 16px; border-radius: 6px; margin: 18px 0; font-size: 14px;
+    }
+    .warn {
+      background: rgba(245, 158, 11, 0.08); border-left: 3px solid #f59e0b;
+      padding: 14px 16px; border-radius: 6px; margin: 18px 0; font-size: 14px;
+    }
+    .muted { color: var(--muted); }
+    footer {
+      margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--border);
+      font-size: 12.5px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap;
+    }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <a class="brand" href="/login">
+      <img src="<%= siteLogo %>" alt="">
+      <span><%= siteName %></span>
+    </a>
+    <h1>Privacy Policy</h1>
+    <div class="updated">
+      Last updated: <%= updated %>
+      <% if (companyName) { %> · Operated by <%= companyName %><% } %>
+    </div>
+  </header>
+
+  <p>
+    This policy explains what personal data <strong><%= siteName %></strong> collects when you
+    use it, why it is collected, and what rights you have over it. It covers the panel
+    itself, the accounts used to sign in, and the machines managed through it.
+  </p>
+
+  <div class="note">
+    <strong>Short version.</strong> The panel stores the account details you give it, the
+    records needed to run your virtual machines, and a log of administrative actions.
+    It does not sell data, does not run advertising trackers, and sets one cookie
+    &mdash; the session cookie that keeps you signed in.
+  </div>
+
+  <h2>1. Who is responsible</h2>
+  <p>
+    The controller of the data described here is the operator of this panel:
+  </p>
+  <ul>
+    <li><strong>Operator:</strong> <%= companyName || siteName %></li>
+    <% if (contactEmail) { %><li><strong>Privacy contact:</strong> <a href="mailto:<%= contactEmail %>"><%= contactEmail %></a></li><% } %>
+    <% if (contactAddress) { %><li><strong>Address:</strong> <%= contactAddress %></li><% } %>
+  </ul>
+  <% if (!contactEmail) { %>
+  <div class="warn">
+    No privacy contact address has been configured. An operator must set one before
+    this policy is shown to the public &mdash; <strong>Admin &rarr; Settings &rarr; Privacy</strong>.
+  </div>
+  <% } %>
+
+  <h2>2. What is collected, and why</h2>
+
+  <h3>Account data</h3>
+  <p>
+    When an account is created the panel stores a username, an email address, an
+    optional full name, a role, and a password that is stored only as a salted hash
+    (never in readable form). The time of your last login and an optional avatar are
+    also stored.
+  </p>
+  <p class="muted">
+    <strong>Why:</strong> to identify you, let you sign in, and decide what you are
+    allowed to access.
+  </p>
+
+  <h3>Sign-in with Google, Discord or GitHub</h3>
+  <p>
+    If you choose to sign in with a third-party account, that provider tells the panel
+    a stable account identifier and, depending on the provider, your email address,
+    display name and avatar. The panel stores the identifier together with the email
+    and name, so it can recognise you on your next visit. The panel never receives your
+    password for those services and cannot read your messages, files or contacts.
+  </p>
+  <table>
+    <tr><th>Provider</th><th>Data received</th></tr>
+    <tr><td>Google</td><td>Account ID, email address, name, avatar URL</td></tr>
+    <tr><td>GitHub</td><td>Account ID, email address (primary, verified), username, avatar URL</td></tr>
+    <tr><td>Discord</td><td>Account ID, email address (if verified), username, avatar URL</td></tr>
+  </table>
+  <p>
+    Signing in this way is optional. The account is linked only when you initiate it, or
+    when the provider states the email address is verified and an account with that same
+    address already exists.
+  </p>
+
+  <h3>Two-factor authentication</h3>
+  <p>
+    If you enable two-factor authentication, the panel stores a TOTP secret and a set of
+    single-use recovery codes. Both are encrypted or hashed at rest. The secret is what
+    lets the panel check the six-digit code from your authenticator app; it is not shared
+    with anyone.
+  </p>
+
+  <h3>Virtual machines and infrastructure</h3>
+  <p>
+    To run what you ask it to run, the panel records the virtual machines and containers
+    you own, their resource allocations, IP addresses, port forwardings, snapshots and
+    backups, OS templates, and the compute nodes those run on. Machine credentials for
+    nodes you add are stored encrypted.
+  </p>
+  <p class="muted">
+    <strong>Why:</strong> this is the service itself. Without these records the panel
+    cannot start, stop, bill or restore your machines.
+  </p>
+
+  <h3>Activity logs</h3>
+  <p>
+    Administrative and security-relevant actions are logged: who did what, to which
+    resource, from which IP address, with which browser user agent, and when. Examples
+    are signing in, changing a password, adding a compute node, approving a node join
+    request, and deleting a machine.
+  </p>
+  <p class="muted">
+    <strong>Why:</strong> security and accountability. These records are what allow the
+    operator to investigate abuse and to answer &ldquo;who approved this?&rdquo;.
+  </p>
+
+  <h3>Server and technical data</h3>
+  <p>
+    Requests to the panel carry an IP address, a timestamp and a user agent. These are
+    processed to deliver the page, enforce rate limits, and keep the service available.
+    IP addresses appear in activity logs and in node join requests.
+  </p>
+
+  <h3>Cookies and local storage</h3>
+  <p>
+    The panel sets exactly one cookie: a session cookie. It holds an opaque session
+    identifier and keeps you signed in between page loads. It is
+    <code>HttpOnly</code>, <code>SameSite=Lax</code>, marked <code>Secure</code> whenever
+    the panel is served over HTTPS, and expires after 24 hours.
+  </p>
+  <p>
+    There are no advertising, analytics or fingerprinting cookies. Because the session
+    cookie is strictly necessary to provide a service you have asked for, it does not
+    require separate consent. Clearing it signs you out.
+  </p>
+
+  <h2>3. Who data is shared with</h2>
+  <p>
+    Data is not sold, rented, or traded. It is disclosed only in these situations:
+  </p>
+  <ul>
+    <li>
+      <strong>Sign-in providers</strong> &mdash; when you choose social login, the
+      exchange with Google, Discord or GitHub is inherent to that choice. Each provider
+      processes data under its own privacy policy.
+    </li>
+    <li>
+      <strong>Infrastructure providers</strong> &mdash; the servers this panel runs on are
+      rented from hosting providers, who necessarily process the data stored on them.
+    </li>
+    <li>
+      <strong>Upstream providers</strong> &mdash; if the operator resells infrastructure
+      from another provider, the details needed to create your machine are passed to them.
+    </li>
+    <li>
+      <strong>Legal obligations</strong> &mdash; where the operator is required by law to
+      disclose data, or needs to disclose it to establish, exercise or defend legal claims.
+    </li>
+  </ul>
+  <p class="muted">
+    Content hosted <em>on</em> a virtual machine you rent is under your control and is not
+    inspected by the panel. The operator's access to it is governed by the terms of service.
+  </p>
+
+  <h2>4. Where data is processed</h2>
+  <p>
+    The panel and its database run on the operator's own servers. Sign-in providers are
+    based in the United States, so choosing social login involves a transfer of the
+    identifiers listed above outside the EEA. That transfer relies on the provider's
+    safeguards &mdash; the EU&ndash;US Data Privacy Framework where the provider is
+    certified, or standard contractual clauses otherwise.
+  </p>
+
+  <h2>5. How long data is kept</h2>
+  <table>
+    <tr><th>Data</th><th>Retention</th></tr>
+    <tr><td>Account and profile</td><td>Until the account is deleted</td></tr>
+    <tr><td>Session cookie</td><td>24 hours, or until you sign out</td></tr>
+    <tr><td>Activity logs</td><td>Retained for security review; deleted when no longer needed</td></tr>
+    <tr><td>Machine records</td><td>While the machine exists, plus any period needed for billing and backups</td></tr>
+    <tr><td>Backups and snapshots</td><td>Per the retention settings in the panel</td></tr>
+    <tr><td>Node join requests</td><td>30 minutes if unapproved; retained briefly after a decision</td></tr>
+  </table>
+  <p>
+    Deleting an account removes its profile and linked sign-in identities. Records that
+    must be kept for accounting or legal reasons, or that exist inside backups until those
+    roll over, may outlive the account.
+  </p>
+
+  <h2>6. Your rights</h2>
+  <p>
+    Depending on where you live, you have some or all of these rights:
+  </p>
+  <ul>
+    <li><strong>Access</strong> &mdash; a copy of the data held about you.</li>
+    <li><strong>Correction</strong> &mdash; fixing data that is wrong (most profile data is editable in the panel).</li>
+    <li><strong>Deletion</strong> &mdash; erasure of your account and the data attached to it.</li>
+    <li><strong>Restriction and objection</strong> &mdash; asking that processing be limited or stopped.</li>
+    <li><strong>Portability</strong> &mdash; receiving your data in a machine-readable format.</li>
+    <li><strong>Withdrawing consent</strong> &mdash; at any time, where processing rests on consent.</li>
+  </ul>
+  <p>
+    To exercise any of these, contact
+    <% if (contactEmail) { %><a href="mailto:<%= contactEmail %>"><%= contactEmail %></a><% } else { %>the operator<% } %>.
+    A response is normally given within one month. You also have the right to complain to
+    your local data protection authority.
+  </p>
+
+  <h2>7. Security</h2>
+  <p>
+    Passwords are stored as salted hashes. Two-factor secrets, node credentials and
+    provider client secrets are encrypted at rest. Traffic should be served over HTTPS;
+    the session cookie is marked <code>Secure</code> when it is. Administrative actions are
+    logged, and actions such as approving a new compute node require a fresh second factor.
+  </p>
+  <p>
+    No system is perfectly secure. If you believe your account has been compromised,
+    change your password and contact the operator.
+  </p>
+
+  <h2>8. Children</h2>
+  <p>
+    The service is not directed at children and accounts are not knowingly created for
+    anyone under the age required to consent to data processing in their country.
+  </p>
+
+  <h2>9. Changes to this policy</h2>
+  <p>
+    This policy may be updated as the panel changes. The date at the top of this page
+    always reflects the current version. Material changes will be announced in the panel.
+  </p>
+
+  <h2>10. Contact</h2>
+  <p>
+    <% if (contactEmail) { %>
+      Questions about this policy or your data:
+      <a href="mailto:<%= contactEmail %>"><%= contactEmail %></a>.
+    <% } else { %>
+      Questions about this policy or your data should be addressed to the operator of this panel.
+    <% } %>
+  </p>
+
+  <footer>
+    <a href="/login">&larr; Back to sign in</a>
+    <% if (termsUrl) { %><a href="<%= termsUrl %>">Terms of Service</a><% } %>
+    <span><%= siteName %> <%= panelVersion %></span>
+  </footer>
+
+</div>
+</body>
+</html>

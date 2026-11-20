@@ -5570,7 +5570,28 @@ app.get('/api/oauth/providers', async (req, res) => {
       `SELECT provider FROM oauth_provider_settings
        WHERE enabled = 1 AND client_id IS NOT NULL AND client_secret_enc IS NOT NULL`
     );
-    res.json({ providers: rows.map((r) => r.provider) });
+    const providers = rows.map((r) => r.provider);
+
+    // Discord also has its own Settings form, which writes the older
+    // `discord_settings` table. That table is what reveals the login button,
+    // so a Discord enabled only there would never be reported as available --
+    // the button stays hidden and the user is stuck with a working config and
+    // no way to use it. Report it here too. /auth/:provider applies the same
+    // fallback, so the button and the route always agree.
+    if (!providers.includes('discord')) {
+      try {
+        const legacy = await hkvmV3Context.db.get(
+          `SELECT enabled, client_id, client_secret FROM discord_settings LIMIT 1`
+        );
+        if (legacy && Number(legacy.enabled) === 1 && legacy.client_id && legacy.client_secret) {
+          providers.push('discord');
+        }
+      } catch (e) {
+        // Table absent on very old installs; just don't advertise Discord.
+      }
+    }
+
+    res.json({ providers });
   } catch (err) {
     res.json({ providers: [] });
   }

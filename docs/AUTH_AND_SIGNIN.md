@@ -93,6 +93,53 @@ Adjust the database path if yours differs (`grep TGVPANEL_DATA_DIR /etc/systemd/
 
 ---
 
+## 3b. Publish your privacy policy first
+
+Google will not let you publish an OAuth app without a privacy policy URL, so do
+this before you start, not after.
+
+The panel already serves one at:
+
+```
+https://your-panel-domain.com/privacy
+```
+
+It is public — no login — because Google's reviewers open it signed out. The text
+describes what this panel actually stores, so you do not need to write anything.
+You only need to fill in **who you are**:
+
+**Admin → Settings → Privacy**
+
+| Field | What it does |
+| --- | --- |
+| Operator / company name | The legal entity responsible. Blank falls back to the panel name |
+| Privacy contact email | **Required.** Shown as the contact for data requests |
+| Postal address | Optional, but expected in the EU/UK |
+| Last updated | Bump this when you change the policy |
+| Terms of service URL | Optional footer link |
+
+Then open `/privacy` and check it reads correctly with your details in it.
+
+> **If the contact email is blank the page still renders — with a visible warning
+> saying it is not publishable.** That is deliberate: a policy with no contact is
+> the first thing a reviewer rejects.
+
+**Paste this into the Google consent screen's "Privacy policy" field:**
+
+```
+https://your-panel-domain.com/privacy
+```
+
+Anything you add later — analytics, a payment processor, an email sender — belongs
+in the "Who data is shared with" section too. The template is
+`views/pages/privacy.ejs`; it is plain HTML you can edit in place.
+
+> **This is a starting point, not legal advice.** It covers what the panel does
+> by default. If you run this commercially, have someone check it against the rules
+> where you operate.
+
+---
+
 ## 4. Add Google sign-in
 
 Google is the one most people want, because most people have a Gmail account.
@@ -122,6 +169,9 @@ Google is the one most people want, because most people have a Gmail account.
 The panel shows you the exact redirect URI to register — copy it from there
 rather than typing it, since a single character off is the usual cause of
 `redirect_uri_mismatch`.
+
+**Before you can publish**, Google's consent screen also asks for a privacy policy
+URL. Use `https://your-panel-domain.com/privacy` — see [3b](#3b-publish-your-privacy-policy-first).
 
 ### Step 3 — check it
 

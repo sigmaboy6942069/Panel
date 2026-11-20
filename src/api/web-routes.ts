@@ -58,6 +58,50 @@ export function createUnifiedWebRouter(
     next();
   });
 
+  // --- Public legal pages -------------------------------------------------
+  // Google requires a reachable privacy policy URL before an OAuth app can be
+  // published, and a signed-in user may not be available to read it, so these
+  // are deliberately public and unauthenticated.
+  router.get('/privacy', async (_req: Request, res: Response) => {
+    const pick = async (key: string, fallback = ''): Promise<string> => {
+      try {
+        const row = await ctx.db.get<{ setting_value: string }>(
+          `SELECT setting_value FROM settings WHERE setting_key = ?`,
+          [key]
+        );
+        return (row?.setting_value || fallback).trim();
+      } catch {
+        return fallback;
+      }
+    };
+
+    const [companyName, contactEmail, contactAddress, termsUrl, updatedAt] = await Promise.all([
+      pick('privacy_company_name'),
+      pick('privacy_contact_email'),
+      pick('privacy_contact_address'),
+      pick('privacy_terms_url'),
+      pick('privacy_updated_at'),
+    ]);
+
+    const fallbackDate = (() => {
+      // A stable, human date rather than "today", so the page does not claim to
+      // have been revised on every request.
+      const d = new Date(process.env.TGVPANEL_PRIVACY_DATE || '2026-01-01');
+      return Number.isNaN(d.getTime())
+        ? '1 January 2026'
+        : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    })();
+
+    return res.render('pages/privacy', {
+      title: `Privacy Policy - ${res.locals.siteName || 'TGVPANEL'}`,
+      companyName,
+      contactEmail,
+      contactAddress,
+      termsUrl,
+      updated: updatedAt || fallbackDate,
+    });
+  });
+
   // --- 2FA Login Step (Session has pending2faUser set during /api/login) ---
   router.get('/login/2fa', (req: Request, res: Response) => {
     const sess: any = (req as any).session;
